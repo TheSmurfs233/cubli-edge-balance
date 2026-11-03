@@ -28,6 +28,7 @@
 #include "bsp_adc.h"
 #include "bsp_vbus.h"
 #include "bsp_gpio.h"
+#include "bsp_imu.h"
 #include "bsp_prof.h"
 #include "bsp_pwm.h"
 #include "bsp_ssi.h"
@@ -359,6 +360,7 @@ void app_init(void)
     mid_enc_init();                    /* MT6701: zero/dir from flash */
     bsp_gpio_init();
     bsp_uart_init();
+    imu_init();              /* N100 Mini on USART1: arm RX DMA, no TX yet */
     bsp_pwm_init();          /* counter runs, six outputs stay off (MOE=0) */
     mid_current_init();      /* offsets to nominal, needs calibration */
     bsp_adc_init();          /* arm the injected group (triggered by TIM1_CC4) */
@@ -406,6 +408,9 @@ void app_init(void)
     log_printf(" uart = %u baud (USART2 -> CH340N), VOFA+ = FireWater%s",
                (unsigned)DBG_UART_BAUD,
                (bsp_uart_cfg_error() != 0u) ? " (CFG MISMATCH)" : "");
+    log_printf(" imu  = USART1 %u baud, %s",
+               (unsigned)IMU_UART_BAUD,
+               (imu_stream_ok() != 0u) ? "streaming" : "no frame yet");
     log_printf("---------------------------------------------");
     log_printf(" KEY -> LED toggle");
     log_printf(" type 'help' for the command list");
@@ -2570,6 +2575,10 @@ void app_loop(void)
     t = bsp_prof_now();
     bsp_uart_tx_pump();
     bsp_prof_add(PROF_TXPUMP, t);
+
+    t = bsp_prof_now();
+    imu_poll();              /* drain USART1 ring, feed the FDILink parser */
+    bsp_prof_add(PROF_IMU, t);
 
     task_adc();
     task_enc_slow(now);

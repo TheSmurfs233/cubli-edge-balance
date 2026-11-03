@@ -38,6 +38,7 @@ typedef enum {
     PROF_TXPUMP,         /* bsp_uart_tx_pump(): start one DMA chunk         */
     PROF_LOOP,           /* whole app_loop() iteration                      */
     PROF_ENC,            /* mid_enc_update(): SSI read + decode + speed     */
+    PROF_IMU,            /* imu_poll(): drain USART1 ring + FDILink parse   */
     PROF_SLOT_COUNT
 } prof_slot_t;
 

@@ -36,10 +36,12 @@
 ## 当前状态
 
 - 阶段：**S1 可构建基线**（方案已评审 → [40_阶段方案_S1.md](40_阶段方案_S1.md)）
-- 进度：**8 步中已完成 1~5 步**（CubeMX 工程 → 合并 `User/` → 挂进 Keil → 接回入口 → 调试口切 USART2）
-  - 构建：`0 error 0 warning`，`Code=64626 RO=2546 RW=496 ZI=10384`
-  - 下一步：**步骤 6 —— 移植 `bsp_imu` + `mid_fdilink`（USART1 / DMA1_CH1）**
-- 已有测试：`test/check_binding.py`（7 项跨文件绑定检查，已通过负向验证）
+- 进度：**8 步中已完成 1~6 步**（CubeMX 工程 → 合并 `User/` → 挂进 Keil → 接回入口 → 调试口切 USART2 → 移植 IMU 链路）
+  - 构建：`0 error 0 warning`，`Code=67870 RO=2810 RW=536 ZI=14352`（Flash 55%、RAM 47%）
+  - 下一步：**步骤 7 —— 建 `test/` 全套（`doc_check.py`、主机测试 + fake HAL、`verify.sh`）**
+- 已有测试：
+  - `test/check_binding.py`：11 项跨文件绑定检查（DMA 通道、串口实例、波特率、环形模式、ASCII），已通过负向验证
+  - `test/l1/run.sh`：把 `User/Mid/mid_fdilink.c` 原样在 gcc 下编译，15 项合成帧对拍
 - 固件版本：`FW_BUILD_ID = 1`，横幅 `cubli/STM32G431KBT6`
 - 基线：`dsh_foc` 分支 `feature/sensorless-foc` @ `d7e08b5`（#173），无感代码保留不删
 - 阻塞 S4 的硬件数据：`18#T4`（轮惯量）、`18#T5`（立方体尺寸/质量/质心）、`18#T6`（IMU 安装轴向）

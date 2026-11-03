@@ -66,22 +66,41 @@ if ch:
 # ------------------------------------------------------------ debug UART
 usart_c = read("Core/Src/usart.c")
 uart_c = read("User/Bsp/bsp_uart.c")
+imu_c = read("User/Bsp/bsp_imu.c")
 board_cfg = read("User/Cfg/board_cfg.h")
 
-uart_in_driver = grab(r"#define\s+DBG_UART_NUM\s+(\d)", uart_c)          # absent => USART2 hardcoded
-if uart_in_driver is None:
-    uart_in_driver = "2" if ("huart2" in uart_c and "huart1" not in uart_c) else "1"
-check("uart: bsp_uart.c drives USART2 and never mentions huart1",
-      uart_in_driver == "2" and ("huart1" not in uart_c) and ("USART1" not in uart_c),
-      "detected USART%s" % uart_in_driver)
+# bsp_uart.c owns USART2 only. USART1 belongs to the IMU module, and the three
+# HAL callbacks may only forward it (never touch a DMA handle of their own).
+check("uart: bsp_uart.c drives huart2 and never takes &huart1",
+      ("huart2" in uart_c) and (not re.search(r"&\s*huart1\b", uart_c)),
+      "&huart1 usage found" if re.search(r"&\s*huart1\b", uart_c) else "")
 
-baud_hw = grab(r"huart" + uart_in_driver + r"\.Init\.BaudRate\s*=\s*(\d+)", usart_c)
+check("uart: all three HAL callbacks forward USART1 to imu_uart_*_isr",
+      all(("%s(" % fn) in uart_c for fn in
+          ("imu_uart_rx_event_isr", "imu_uart_tx_cplt_isr", "imu_uart_error_isr")),
+      "missing forwarding")
+
+baud_hw2 = grab(r"huart2\.Init\.BaudRate\s*=\s*(\d+)", usart_c)
 baud_cfg = grab(r"#define\s+DBG_UART_BAUD\s+(\d+)u?", board_cfg)
-check("uart: DBG_UART_BAUD == huart%s.Init.BaudRate" % uart_in_driver, baud_hw == baud_cfg,
-      "cubemx=%s config=%s" % (baud_hw, baud_cfg))
+check("uart: DBG_UART_BAUD == huart2.Init.BaudRate", baud_hw2 == baud_cfg,
+      "cubemx=%s config=%s" % (baud_hw2, baud_cfg))
 
-rx_mode = grab(r"hdma_usart" + uart_in_driver + r"_rx\.Init\.Mode\s*=\s*(DMA_\w+)", usart_c)
+rx_mode = grab(r"hdma_usart2_rx\.Init\.Mode\s*=\s*(DMA_\w+)", usart_c)
 check("uart: RX DMA mode is DMA_CIRCULAR", rx_mode == "DMA_CIRCULAR", "cubemx=%s" % rx_mode)
+
+# ---------------------------------------------------------------- IMU link
+baud_hw1 = grab(r"huart1\.Init\.BaudRate\s*=\s*(\d+)", usart_c)
+baud_imu = grab(r"#define\s+IMU_UART_BAUD\s+(\d+)u?", board_cfg)
+check("imu: IMU_UART_BAUD == huart1.Init.BaudRate", baud_hw1 == baud_imu,
+      "cubemx=%s config=%s" % (baud_hw1, baud_imu))
+
+rx1_mode = grab(r"hdma_usart1_rx\.Init\.Mode\s*=\s*(DMA_\w+)", usart_c)
+check("imu: USART1 RX is circular (parser assumes a wrapping DMA buffer)",
+      rx1_mode == "DMA_CIRCULAR", "cubemx=%s" % rx1_mode)
+
+check("imu: bsp_imu.c receives on huart1 and never on huart2",
+      ("&huart1" in imu_c) and ("&huart2" not in imu_c),
+      "&huart2 found in bsp_imu.c" if "&huart2" in imu_c else "&huart1 missing")
 
 # The 4 DMA handles this project uses must all exist and be distinct.
 used = re.findall(r"hdma_(?:usart\d_[rt]x|spi1_rx)\.Instance\s*=\s*(DMA1_Channel\d+)", usart_c + spi_c)

@@ -467,6 +467,12 @@
               <FilePath>../User/Bsp/bsp_cordic.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_imu.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Bsp/bsp_imu.c</FilePath>
+            </File>
+
+            <File>
               <FileName>bsp_ssi.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Bsp/bsp_ssi.c</FilePath>
@@ -531,6 +537,12 @@
               <FileType>1</FileType>
               <FilePath>../User/Alg/alg_pi.c</FilePath>
             </File>
+            <File>
+              <FileName>mid_fdilink.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Mid/mid_fdilink.c</FilePath>
+            </File>
+
             <File>
               <FileName>alg_foc.c</FileName>
               <FileType>1</FileType>

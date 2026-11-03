@@ -1,13 +1,13 @@
-# ---- 鏈伐绋嬩复鏃朵骇鐗?----
+# ---- 本工程临时产物 ----
 .tmp_env/
 sim/__pycache__/
 __pycache__/
 *.pyc
 
-# ---- 鍙傝€冩潗鏂欙紙浣撶Н澶?/ 鍚祵濂?git锛屼笉鎻愪氦锛?---
+# ---- 参考资料（体积大 / 含嵌套 .git，不提交）----
 ref_pro/
 
-# ---- Keil 鏋勫缓浜х墿 ----
+# ---- Keil 构建产物 ----
 MDK-ARM/cubli/
 MDK-ARM/Objects/
 MDK-ARM/Listings/
@@ -15,8 +15,9 @@ MDK-ARM/DebugConfig/
 MDK-ARM/*.log
 MDK-ARM/*.uvguix
 MDK-ARM/*.uvguix.*
-# Keil 姣忔鎵撳紑/鏋勫缓閮戒細閲嶅啓 .uvoptx锛堢獥鍙ｅ竷灞€銆佹柇鐐广€佽皟璇曞櫒閫夋嫨锛夛紝
-# 浼氫骇鐢熶笂鍗冭鏃犲叧 diff銆侷ncludeInBuild 瀛樺湪 .uvprojx 閲岋紝杩欎釜鏂囦欢涓嶇敤鎻愪氦銆?MDK-ARM/*.uvoptx
+# Keil 每次打开/构建都会重写 .uvoptx（窗口布局、断点、调试器选择），
+# 会产生上千行无关 diff。IncludeInBuild 存在 .uvprojx 里，这个文件不用提交。
+MDK-ARM/*.uvoptx
 *.axf
 *.hex
 *.bin
@@ -33,15 +34,17 @@ MDK-ARM/*.uvguix.*
 *.sct
 *.build_log.htm
 
-# ---- 涓绘満娴嬭瘯浜岃繘鍒?----
+# ---- 主机测试 / L1 仿真产物 ----
 test/host/run_tests.exe
 test/host/*.exe
 test/host/*.o
+test/l1/.build/
+test/l1/*.exe
 
-# ---- 鍘傚晢 CMSIS DSP锛?5 MB锛屾湰宸ョ▼涓嶄娇鐢紝CubeMX 鍙畬鍏ㄩ噸寤?----
+# ---- 厂商 CMSIS DSP（45 MB，本工程不使用，CubeMX 可完全重建）----
 Drivers/CMSIS/DSP/
 
-# ---- 缂栬緫鍣?/ 绯荤粺 ----
+# ---- 编辑器 / 系统 ----
 .vscode/
 .settings/
 *.bak

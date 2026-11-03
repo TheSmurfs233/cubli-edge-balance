@@ -16,6 +16,7 @@
 #include "bsp_adc.h"
 #include "bsp_cordic.h"
 #include "bsp_gpio.h"
+#include "bsp_imu.h"
 #include "bsp_prof.h"
 #include "bsp_vbus.h"
 #include "bsp_pwm.h"
@@ -154,6 +155,7 @@ static void print_help(void)
     log_printf(" dir <0|1>      phase sequence, 1 reverses the rotation");
     log_printf(" cal [erase]    zero-drift calibration (needs start), erase = wipe");
     log_printf(" prof [reset|on|off]  per-stage timing profile (DWT)");
+    log_printf(" imu            IMU link health and the last attitude frame");
     log_printf(" phase [reset]  where each step lands in the 50us PWM period");
     log_printf(" trig           benchmark the sin/cos back end (LUT or CORDIC)");
     log_printf(" cordic         dump raw CORDIC readback for 4 angles");
@@ -244,6 +246,40 @@ static void print_stat(void)
     log_printf("----------------");
 }
 
+/* IMU status: link health first, then the last attitude.
+ * The balance state machine will gate on imu_stream_ok(), so "age" is the
+ * single number to look at when the cube refuses to enter balance. */
+static void print_imu(void)
+{
+    const fdilink_ctx_t *ctx = imu_ctx();
+    const fdilink_stat_t *st = &ctx->stat;
+    fdilink_ahrs_t ahrs;
+
+    log_printf("---- imu (USART1, FDILink) ----");
+    log_printf(" link  = %s, %u baud, age %u ms (timeout %u)",
+               (imu_stream_ok() != 0u) ? "OK" : "NO FRAME",
+               (unsigned)IMU_UART_BAUD, (unsigned)imu_frame_age_ms(),
+               (unsigned)IMU_FRAME_TIMEOUT_MS);
+    log_printf(" rx    = %u B, drop=%u err=%u tx_stuck=%u",
+               (unsigned)imu_rx_bytes(), (unsigned)imu_rx_drop(),
+               (unsigned)imu_rx_error(), (unsigned)imu_tx_stuck());
+    log_printf(" frame = %u ok (%u imu, %u ahrs, %u other)",
+               (unsigned)st->frames, (unsigned)st->frames_imu,
+               (unsigned)st->frames_ahrs, (unsigned)st->frames_other);
+    log_printf(" error = crc8=%u crc16=%u tail=%u len=%u drop_byte=%u gap=%u/%u",
+               (unsigned)st->err_crc8, (unsigned)st->err_crc16,
+               (unsigned)st->err_tail, (unsigned)st->err_len,
+               (unsigned)st->dropped_byte,
+               (unsigned)st->seq_gap_imu, (unsigned)st->seq_gap_ahrs);
+    if (imu_get_ahrs(&ahrs) != 0u) {
+        log_printf(" ahrs  = roll %.2f pitch %.2f heading %.2f deg",
+                   (double)ahrs.roll, (double)ahrs.pitch, (double)ahrs.heading);
+    } else {
+        log_printf(" ahrs  = no 0x41 frame yet");
+    }
+    log_printf("----------------");
+}
+
 /* ------------------------------------------------------------------ */
 /* Dispatch                                                            */
 /* ------------------------------------------------------------------ */
@@ -270,6 +306,10 @@ static float   s_pll_zeta = PLL_ZETA;
     /* ---------------- stat ---------------- */
     else if (strcmp(tok[0], "stat") == 0) {
         print_stat();
+    }
+    /* ---------------- imu ----------------- */
+    else if (strcmp(tok[0], "imu") == 0) {
+        print_imu();
     }
     /* ---------------- start --------------- */
     else if (strcmp(tok[0], "start") == 0) {
@@ -1326,7 +1366,7 @@ static float   s_pll_zeta = PLL_ZETA;
         } else {
             static const char *const names[PROF_SLOT_COUNT] = {
                 "isr", "isr_period", "adc_read", "conv",
-                "wave", "cmd", "txpump", "loop", "enc"
+                "wave", "cmd", "txpump", "loop", "enc", "imu"
             };
             uint8_t i;
 

@@ -26,6 +26,7 @@
   */
 
 #include "bsp_uart.h"
+#include "bsp_imu.h"
 #include "board_cfg.h"
 #include "usart.h"
 #include "mid_ringbuf.h"
@@ -185,6 +186,13 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     uint16_t last;
     uint16_t seg;
 
+    /* USART1 belongs to the IMU module. HAL weak callbacks can only be defined
+     * once per project, so this file dispatches by Instance; see bsp_imu.c. */
+    if (huart->Instance == USART1) {
+        imu_uart_rx_event_isr(huart, Size);
+        return;
+    }
+
     if (huart->Instance != USART2) { return; }
     if (Size > DBG_RX_BUF_SIZE)    { Size = DBG_RX_BUF_SIZE; }
 
@@ -235,6 +243,11 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
   */
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
+    if (huart->Instance == USART1) {
+        imu_uart_tx_cplt_isr(huart);
+        return;
+    }
+
     if (huart->Instance != USART2) { return; }
     s_tx_busy = 0u;
 }
@@ -245,6 +258,11 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
   */
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
+    if (huart->Instance == USART1) {
+        imu_uart_error_isr(huart);
+        return;
+    }
+
     if (huart->Instance != USART2) { return; }
 
     __HAL_UART_CLEAR_OREFLAG(huart);

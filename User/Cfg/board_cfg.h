@@ -259,6 +259,37 @@ extern "C" {
 
 
 /* ==========================================================================
+ * 6b. IMU link: N100 Mini nine-axis AHRS over USART1
+ *     PB6 = USART1_TX, PB7 = USART1_RX -> CN3 (WAFER-SH1.0-6P)
+ *     RX: DMA1_Channel1 circular, TX: DMA1_Channel2 normal (see docs/19 sec.9)
+ *     Protocol: FDILink V21.0823, frames 0x40 (IMU) / 0x41 (AHRS),
+ *     measured 200 frames/s (5 ms per frame) on the previous project.
+ *
+ *     Buffer sizing rationale (ported from the gyroscope project, unchanged):
+ *       every 5 ms the module sends about 110 B (0x40 = 64 B, 0x41 = 56 B on the
+ *       wire), i.e. ~22 kB/s. The main loop runs at a few kHz, so a 2 kB ring
+ *       absorbs ~90 ms of stall; that is far more than any loop iteration needs.
+ * ========================================================================== */
+#define IMU_UART_BAUD           921600u
+#define IMU_RX_BUF_SIZE         512u            /* DMA circular buffer (power of 2) */
+#define IMU_RX_STREAM_RING      2048u           /* parser ring buffer (power of 2) */
+#define IMU_ASCII_RING_SIZE     512u            /* config-mode ASCII replies */
+#define IMU_TX_RING_SIZE        128u            /* config commands queued for TX */
+#define IMU_TX_DMA_CHUNK        32u             /* bytes per interrupt transfer */
+#define IMU_TX_STUCK_MS         50u             /* TX watchdog: panel data is tiny */
+
+/* A frame arrives every 5 ms; 500 ms of silence means the cable is out, the
+ * module rebooted, or the baud rate is wrong. Used by imu_stream_ok(), which the
+ * balance state machine will require before allowing "bal on". */
+#define IMU_FRAME_TIMEOUT_MS    500u
+/* Longest wait for a config-command reply (configuration only, never in control) */
+#define IMU_CMD_TIMEOUT_MS      800u
+
+/* Sniff ring for "imu raw"/offline frame checks; must be a power of two */
+#define IMU_UART_SNIFF_SIZE     256u
+
+
+/* ==========================================================================
  * 7. MT6701 magnetic encoder (SSI over SPI1)
  *    PA15 = CSN, PB3 = SCK, PB4 = MISO, PB5 = MOSI, SPI mode 1, 10.625 MHz
  *    Frame: D[13:0] angle, Mg[3:0] status, CRC[5:0] (x^6+x+1)
