@@ -243,3 +243,6 @@
 | `User\`、`test\`、`sim\` 目录 | 不在 CubeMX 管辖范围 |
 | `-D` 预定义宏（如 `USE_HAL_DRIVER`、版本宏） | 同上 |
 | `Core\Src\main.c` 的 `USER CODE` 段接入 `app_main()` | 避免下次重新生成被覆盖 |
+| **`MDK-ARM\cubli.uvprojx` 的 IROM 链接区收窄到 `0x8000000`/`0x1f800`**（`OnChipMemories/OCR_RVCT4`、`OCR_RVCT9`） | CubeMX 生成的工程这两个字段是**空的**，实际 scatter 变成 128 KB 全量；而校准记录区 `CAL_FLASH_ADDR=0x0801F800` 占最后一页 2 KB，`bsp_flash` 擦写会**擦掉代码**。首次生成已踩到，见 [00_开发日志.md](00_开发日志.md) #007 |
+| **`MDK-ARM\startup_stm32g431xx.s` 的 `Stack_Size` 改 `0x800`** | CubeMX 默认 `0x400`；日志里的 `printf`/浮点格式化可能要 500 B+ 栈，异常复位优先怀疑栈溢出 |
+| 重新生成后再核对 §3 的 4 项参数 | CubeMX GUI 改完保存，生成代码才生效；每次重生成都要复查一遍 |

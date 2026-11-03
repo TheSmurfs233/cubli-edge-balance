@@ -26,7 +26,7 @@ extern "C" {
 /* ==========================================================================
  * 0. Board identity
  * ========================================================================== */
-#define BOARD_NAME              "Board_v2/STM32G431KBT6"
+#define BOARD_NAME              "cubli/STM32G431KBT6"
 
 /* Firmware build id - bump by 1 on EVERY firmware change.
  *
@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID         173u
+#define FW_BUILD_ID         1u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
