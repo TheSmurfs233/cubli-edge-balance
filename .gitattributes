@@ -1,0 +1,29 @@
+# 行尾归一化：仓库统一存 LF，检出时按规则转换。
+# 本机 core.autocrlf=true，若不固定，bash 脚本会被转成 CRLF 而在 WSL 里直接报
+# "bad interpreter: /usr/bin/env: 'bash\r'" —— 这类错误看起来像"脚本写错了"，实为行尾。
+* text=auto
+
+# 必须在 POSIX shell / Python 里执行的脚本，永远用 LF
+*.sh   text eol=lf
+*.py   text eol=lf
+*.ioc  text eol=lf
+
+# 固件源码与 Keil 工程：保持检出为 CRLF（ARMCC V5 与 Keil 均无问题，且与基线一致）
+*.c    text eol=crlf
+*.h    text eol=crlf
+*.s    text eol=crlf
+*.uvprojx text eol=crlf
+
+# 文档与配置：跟随平台
+*.md   text
+*.json text
+*.yml  text
+*.txt  text
+
+# 二进制，禁止任何转换
+*.hex  binary
+*.bin  binary
+*.axf  binary
+*.pdf  binary
+*.png  binary
+*.jpg  binary
