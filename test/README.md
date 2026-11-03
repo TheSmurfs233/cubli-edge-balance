@@ -7,9 +7,19 @@
 |---|---|---|---|
 | 跨文件绑定检查 | `python test/check_binding.py` | 静态 | ✅ 11 项 |
 | 纯算法离线对拍 | `bash test/l1/run.sh` | L1 | ✅ 15 项（`mid_fdilink`） |
-| 主机测试（fake HAL） | `bash test/host/build.sh` | L2 | ⬜ S1 步骤 7 |
-| 文档一致性检查 | `python test/doc_check.py` | 静态 | ⬜ S1 步骤 7 |
-| 一键复现 | `bash test/verify.sh` | 汇总 | ⬜ S1 步骤 7 |
+| 主机测试（fake HAL） | `bash test/host/build.sh` | L2 | ✅ 594 项 |
+| 文档一致性检查 | `python test/doc_check.py` | 静态 | ✅ PASS |
+| 一键复现 | `bash test/verify.sh` | 汇总 | ✅ 4 道门全绿 |
+
+固件构建（0 error / 0 warning）是 **Windows 独有**的门禁，不在 `verify.sh` 里：
+
+```powershell
+Start-Process "D:/installfile/Keil_v5/UV4/UV4.exe" `
+  -ArgumentList '-r','cubli.uvprojx','-j0','-o','build_s1_step7.log' `
+  -WorkingDirectory "D:\Embedded\STM32\cubli\MDK-ARM" -Wait -PassThru
+```
+
+返回码 0 = 成功，1 = 有警告，2 = 有错误；**每次换日志文件名**。
 
 ## 层级说明
 

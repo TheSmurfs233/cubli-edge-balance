@@ -35,6 +35,7 @@ MDK-ARM/*.uvoptx
 *.build_log.htm
 
 # ---- 主机测试 / L1 仿真产物 ----
+test/host/run_tests
 test/host/run_tests.exe
 test/host/*.exe
 test/host/*.o
