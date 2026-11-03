@@ -8,26 +8,45 @@ __pycache__/
 ref_pro/
 
 # ---- Keil 构建产物 ----
+MDK-ARM/cubli/
 MDK-ARM/Objects/
 MDK-ARM/Listings/
 MDK-ARM/DebugConfig/
-MDK-ARM/RTE/
 MDK-ARM/*.log
-*.uvguix.*
-*.uvoptx.bak
-*.dep
-*.crf
-*.o
-*.d
+MDK-ARM/*.uvguix
+MDK-ARM/*.uvguix.*
+# Keil 每次打开/构建都会重写 .uvoptx（窗口布局、断点、调试器选择），
+# 会产生上千行无关 diff。IncludeInBuild 存在 .uvprojx 里，这个文件不用提交。
+MDK-ARM/*.uvoptx
 *.axf
 *.hex
 *.bin
+*.elf
 *.map
-*.htm
+*.o
+*.d
+*.crf
 *.lnp
-*.lst
+*.dep
+*.htm
+*.iex
+*.tra
+*.sct
+*.build_log.htm
 
-# ---- 系统 ----
+# ---- 主机测试二进制 ----
+test/host/run_tests.exe
+test/host/*.exe
+test/host/*.o
+
+# ---- 厂商 CMSIS DSP：45 MB，本工程不使用，CubeMX 可完全重建 ----
+Drivers/CMSIS/DSP/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.settings/
+*.bak
+*.orig
 Thumbs.db
 desktop.ini
 .DS_Store
