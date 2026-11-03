@@ -227,8 +227,11 @@ extern "C" {
 
 /* ==========================================================================
  * 6. Debug UART
- *    USART1 (PB6=TX / PB7=RX) goes to header CN3 -> external USB-TTL.
- *    The on-board CH340N is wired to USART2 (PA2/PA3) and is not used here.
+ *    USART2 (PA2=TX / PA3=RX) goes to the on-board CH340N -> USB Type-C.
+ *    USART1 (PB6/PB7 -> CN3) is reserved for the N100 Mini IMU (see the
+ *    hardware document, docs/19).
+ *    This is why the debug console moved: plugging the IMU into CN3 kills the
+ *    USB-TTL link on COM7, so logs come out of COM13 instead.
  * ========================================================================== */
 #define DBG_UART_BAUD           1000000u
 #define DBG_RX_BUF_SIZE         128u            /* DMA circular buffer (power of 2) */
@@ -242,7 +245,7 @@ extern "C" {
  * permanently silent while the motor keeps running. See bsp_uart_tx_pump(). */
 #define DBG_TX_STUCK_MS         100u
 
-/* Waveform output goes out on the SAME UART as the text (USART1) using the
+/* Waveform output goes out on the SAME UART as the text (USART2) using the
  * FireWater text protocol, so VOFA+ can plot and you can still read the log. */
 /* FireWater CSV with 6 channels is ~44 B/frame:
  *   100 Hz ->  4.4 kB/s ( 4% of 1Mbaud)

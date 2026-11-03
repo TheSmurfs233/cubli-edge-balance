@@ -11,8 +11,10 @@
   * Park transform, so those microseconds land inside the control chain. Moving
   * the RX side to DMA leaves just the three dummy writes (~0.3us) on the CPU.
   *
-  * DMA1 channel 3 is free (USART1 uses channels 1 and 2); DMAMUX request 10 is
-  * SPI1_RX.
+  * SPI1_RX is on DMA1_Channel5 in this project (CubeMX: Dma.SPI1_RX.5, DMAMUX
+  * request DMA_REQUEST_SPI1_RX). dsh_foc had the same transfer on channel 3, so
+  * every channel-dependent constant below is a macro and bsp_ssi_init() checks
+  * it against the handle CubeMX built.
   ******************************************************************************
   */
 
@@ -22,7 +24,11 @@
 
 extern SPI_HandleTypeDef hspi1;
 
-#define SSI_DMA           DMA1_Channel3
+/* SPI1_RX = DMA1_Channel5. IFCR/ISR flag names are channel specific, so the
+ * number appears in four places; keep them together. */
+#define SSI_DMA            DMA1_Channel5
+#define SSI_IFCR_CGIF      DMA_IFCR_CGIF5
+#define SSI_ISR_TCIF       DMA_ISR_TCIF5
 /* TXE comes back within one bit time (94 ns ~ 16 cycles); a generous 128
  * iterations is still under 1 us. The old 20000 could have blocked the
  * 20 kHz ISR for over a millisecond if the SPI ever stalled. */
@@ -33,16 +39,27 @@ static volatile uint8_t s_rx[3];
 static volatile uint8_t s_busy;
 static volatile uint32_t s_ovr;   /* SPI RX overruns (a byte was lost) */
 static uint8_t  s_stuck;  /* consecutive ISR periods still busy */
+static uint8_t  s_cfg_err; /* DMA channel in code != the one CubeMX configured */
 
 void bsp_ssi_init(void)
 {
-    /* CSN idles high. SPI1 and DMA1_Channel3 are both initialised by CubeMX:
+    /* CSN idles high. SPI1 and hdma_spi1_rx are both initialised by CubeMX:
      * MX_DMA_Init() calls HAL_DMA_Init(&hdma_spi1_rx) with the same settings
      * this driver needs (SPI1_RX, byte, memory increment, normal mode), so
      * only the pieces HAL_DMA_Start() would normally set are done here. */
     HAL_GPIO_WritePin(CSN_GPIO_Port, CSN_Pin, GPIO_PIN_SET);
 
-    /* CubeMX also enables DMA1_Channel3 in the NVIC, which is its default when a
+    /* Cross-check that the channel compiled in matches what CubeMX wired up.
+     * A .ioc change can move SPI1_RX to another channel; without this check the
+     * driver would silently poll the wrong TC flag and the encoder would read
+     * stale bytes with every CRC still passing. */
+    if ((hspi1.hdmarx == 0) || (hspi1.hdmarx->Instance != SSI_DMA)) {
+        s_cfg_err = 1u;
+        return;
+    }
+    s_cfg_err = 0u;
+
+    /* CubeMX also enables DMA1_Channel5 in the NVIC, which is its default when a
      * DMA request is added. That is harmless here: this driver polls the TC flag
      * and never sets TCIE, so no interrupt request can ever be generated. */
     SSI_DMA->CPAR  = (uint32_t)&SPI1->DR;
@@ -61,6 +78,10 @@ void bsp_ssi_start(void)
     uint32_t spin;
     uint8_t  i;
 
+    if (s_cfg_err != 0u) {
+        return;                 /* wrong DMA channel: never touch the bus */
+    }
+
     if (s_busy != 0u) {
         /* A previous transfer is still in flight. Normally the main loop
          * collects it long before this, so seeing several ISR periods in a row
@@ -74,7 +95,7 @@ void bsp_ssi_start(void)
 
     SSI_DMA->CCR   &= ~DMA_CCR_EN;
     SSI_DMA->CNDTR  = 3u;
-    DMA1->IFCR      = DMA_IFCR_CGIF3;
+    DMA1->IFCR      = SSI_IFCR_CGIF;
     SSI_DMA->CCR   |= DMA_CCR_EN;
     SPI1->CR2      |= SPI_CR2_RXDMAEN;
 
@@ -99,7 +120,7 @@ uint8_t bsp_ssi_poll(uint8_t frame[3])
     if (s_busy == 0u) {
         return 0u;
     }
-    if ((DMA1->ISR & DMA_ISR_TCIF3) == 0u) {
+    if ((DMA1->ISR & SSI_ISR_TCIF) == 0u) {
         return 0u;                    /* still shifting */
     }
 
@@ -139,6 +160,11 @@ uint32_t bsp_ssi_ovr_count(void)
 uint8_t bsp_ssi_busy(void)
 {
     return s_busy;
+}
+
+uint8_t bsp_ssi_cfg_error(void)
+{
+    return s_cfg_err;
 }
 
 void bsp_ssi_abort(void)

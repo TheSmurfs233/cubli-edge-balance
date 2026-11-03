@@ -1,7 +1,7 @@
 /**
   ******************************************************************************
   * @file    bsp_uart.h
-  * @brief   Debug UART (USART1) non-blocking TX/RX driver.
+  * @brief   Debug UART (USART2, PA2=TX/PA3=RX -> on-board CH340N -> USB-C).
   *
   *   RX: DMA circular + IDLE detect -> ring buffer, zero CPU load
   *   TX: application writes into a 4KB ring buffer, the main loop pumps it
@@ -19,6 +19,14 @@ extern "C" {
 #include <stdint.h>
 
 void     bsp_uart_init(void);
+
+/* Bitmask of CubeMX-vs-driver mismatches found by bsp_uart_init().
+ * Non-zero means logs may be garbage or RX may lose buffers; the banner shows
+ * the raw value so a bad .ioc regeneration is visible at power-on. */
+#define BSP_UART_CFG_BAUD        0x01u   /* Init.BaudRate != DBG_UART_BAUD      */
+#define BSP_UART_CFG_NO_DMA      0x02u   /* no RX DMA handle linked             */
+#define BSP_UART_CFG_DMA_MODE    0x04u   /* RX DMA is not CIRCULAR              */
+uint8_t  bsp_uart_cfg_error(void);
 
 /* Queue data for transmission, returns bytes accepted (non-blocking) */
 uint16_t bsp_uart_tx_write(const uint8_t *src, uint16_t len);

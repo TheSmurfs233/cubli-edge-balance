@@ -187,7 +187,7 @@ static void print_version(void)
                (unsigned)(VBUS_DIV_RATIO + 0.5f),
                (unsigned)(VBUS_V_PER_LSB * 1000000.0f + 0.5f),
                (unsigned)(VBUS_MAX_MEASURABLE_V * 1000.0f + 0.5f));
-    log_printf("uart  = %u baud (USART1 PB6/PB7), VOFA+ = FireWater",
+    log_printf("uart  = %u baud (USART2 PA2/PA3, CH340N), VOFA+ = FireWater",
                (unsigned)DBG_UART_BAUD);
 }
 

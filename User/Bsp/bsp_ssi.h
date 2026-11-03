@@ -43,6 +43,10 @@ uint32_t bsp_ssi_ovr_count(void);
 /* 1 while a transfer is armed but not yet collected. */
 uint8_t bsp_ssi_busy(void);
 
+/* 1 if the DMA channel compiled into this driver does not match the one CubeMX
+ * configured for SPI1_RX (bsp_ssi_init() then refuses to touch the bus). */
+uint8_t bsp_ssi_cfg_error(void);
+
 /* Drop any transfer in flight and release CSN (recovery path). */
 void bsp_ssi_abort(void);
 

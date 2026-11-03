@@ -1,15 +1,15 @@
 /**
   ******************************************************************************
   * @file    bsp_uart.c
-  * @brief   USART1 non-blocking driver (DMA + ring buffers).
+  * @brief   USART2 non-blocking driver (DMA + ring buffers).
   *
   * RX path:
-  *   USART1(PB7) -> DMA1_CH1 (CIRCULAR) -> rx_dma_buf -> IDLE/half/full IRQ
+  *   USART2(PA3) -> DMA1_CH3 (CIRCULAR) -> rx_dma_buf -> IDLE/half/full IRQ
   *               -> RxEventCallback -> rx_ring
   *
   * TX path:
   *   app -> tx_ring -> bsp_uart_tx_pump() (main loop)
-  *       -> tx_dma_buf -> DMA1_CH2 (NORMAL) -> USART1(PB6)
+  *       -> tx_dma_buf -> DMA1_CH4 (NORMAL) -> USART2(PA2)
   *
   *   s_tx_busy is cleared only by HAL_UART_TxCpltCallback. A lost completion
   *   event would silence the link forever, so the pump owns a watchdog
@@ -31,9 +31,6 @@
 #include "mid_ringbuf.h"
 #include <string.h>
 
-/* hdma_usart1_rx is defined in usart.c but not declared in usart.h */
-extern DMA_HandleTypeDef hdma_usart1_rx;
-
 /* ------------------------------------------------------------------ */
 /* Internal buffers                                                    */
 /* ------------------------------------------------------------------ */
@@ -49,6 +46,7 @@ static uint8_t   s_tx_dma_buf[DBG_TX_DMA_CHUNK];
 static volatile uint8_t s_tx_busy;              /* 1 = DMA transmit in flight */
 static uint32_t  s_tx_start_ms;                 /* when s_tx_busy was set */
 static uint32_t  s_tx_stuck_cnt;                /* watchdog recoveries */
+static uint8_t   s_cfg_err;                     /* BSP_UART_CFG_* bitmask */
 
 /* ------------------------------------------------------------------ */
 /* Init                                                                */
@@ -63,12 +61,33 @@ void bsp_uart_init(void)
     s_tx_start_ms = 0u;
     s_tx_stuck_cnt = 0u;
 
-    /* RX DMA mode comes from CubeMX (.ioc: USART1_RX = CIRCULAR). The firmware
+    /* Cross-check the two things this driver *assumes* about the CubeMX side.
+     * Both have been wrong before and both fail silently:
+     *   - a baud mismatch prints readable-looking garbage, not an error;
+     *   - a NORMAL-mode RX DMA makes the position-wrap logic drop whole buffers
+     *     each time the circular buffer would have wrapped.
+     * Neither shows up in "0 errors / 0 warnings". */
+    s_cfg_err = 0u;
+    if (huart2.Init.BaudRate != (uint32_t)DBG_UART_BAUD) {
+        s_cfg_err |= (uint8_t)BSP_UART_CFG_BAUD;
+    }
+    if ((huart2.hdmarx == 0) || (huart2.hdmarx->Instance == 0)) {
+        s_cfg_err |= (uint8_t)BSP_UART_CFG_NO_DMA;
+    } else if (huart2.hdmarx->Init.Mode != DMA_CIRCULAR) {
+        s_cfg_err |= (uint8_t)BSP_UART_CFG_DMA_MODE;
+    }
+
+    /* RX DMA mode comes from CubeMX (.ioc: USART2_RX = CIRCULAR). The firmware
      * used to force-circular here; that override was removed on 2026-10-25 once
      * the .ioc was fixed, so this module no longer rewrites a CubeMX setting. */
 
     /* Start reception: callback fires on buffer-full or line-idle */
-    (void)HAL_UARTEx_ReceiveToIdle_DMA(&huart1, s_rx_dma_buf, DBG_RX_BUF_SIZE);
+    (void)HAL_UARTEx_ReceiveToIdle_DMA(&huart2, s_rx_dma_buf, DBG_RX_BUF_SIZE);
+}
+
+uint8_t bsp_uart_cfg_error(void)
+{
+    return s_cfg_err;
 }
 
 /* ------------------------------------------------------------------ */
@@ -91,7 +110,7 @@ void bsp_uart_tx_pump(void)
         if ((uint32_t)(HAL_GetTick() - s_tx_start_ms) < (uint32_t)DBG_TX_STUCK_MS) {
             return;
         }
-        (void)HAL_UART_AbortTransmit(&huart1);
+        (void)HAL_UART_AbortTransmit(&huart2);
         s_tx_busy = 0u;
         s_tx_stuck_cnt++;
     }
@@ -101,7 +120,7 @@ void bsp_uart_tx_pump(void)
 
     s_tx_busy     = 1u;
     s_tx_start_ms = HAL_GetTick();
-    if (HAL_UART_Transmit_DMA(&huart1, s_tx_dma_buf, n) != HAL_OK) {
+    if (HAL_UART_Transmit_DMA(&huart2, s_tx_dma_buf, n) != HAL_OK) {
         /* UART still busy: keep the data queued, retry next round */
         s_tx_busy = 0u;
         return;
@@ -166,7 +185,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     uint16_t last;
     uint16_t seg;
 
-    if (huart->Instance != USART1) { return; }
+    if (huart->Instance != USART2) { return; }
     if (Size > DBG_RX_BUF_SIZE)    { Size = DBG_RX_BUF_SIZE; }
 
     last = s_rx_last_pos;
@@ -216,7 +235,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
   */
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
-    if (huart->Instance != USART1) { return; }
+    if (huart->Instance != USART2) { return; }
     s_tx_busy = 0u;
 }
 
@@ -226,7 +245,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
   */
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
-    if (huart->Instance != USART1) { return; }
+    if (huart->Instance != USART2) { return; }
 
     __HAL_UART_CLEAR_OREFLAG(huart);
     __HAL_UART_CLEAR_NEFLAG(huart);
@@ -234,5 +253,5 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     __HAL_UART_CLEAR_PEFLAG(huart);
 
     s_rx_last_pos = 0u;
-    (void)HAL_UARTEx_ReceiveToIdle_DMA(&huart1, s_rx_dma_buf, DBG_RX_BUF_SIZE);
+    (void)HAL_UARTEx_ReceiveToIdle_DMA(&huart2, s_rx_dma_buf, DBG_RX_BUF_SIZE);
 }

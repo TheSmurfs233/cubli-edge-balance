@@ -30,6 +30,7 @@
 #include "bsp_gpio.h"
 #include "bsp_prof.h"
 #include "bsp_pwm.h"
+#include "bsp_ssi.h"
 #include "bsp_sys.h"
 #include "bsp_uart.h"
 #include "mid_current.h"
@@ -379,10 +380,11 @@ void app_init(void)
                (unsigned)PWM_FREQ_HZ_CALC, (unsigned)PWM_ARR, (unsigned)PWM_DTG_REG);
     log_printf(" trig = %s%s", mid_trig_name(),
                (s_trig_status != 0u) ? " (SELF TEST FAILED)" : "");
-    log_printf(" enc  = %s, off %.1f deg, dir %u",
+    log_printf(" enc  = %s, off %.1f deg, dir %u%s",
                (mid_enc_info()->src == ENC_SRC_FLASH) ? "flash" : "default",
                (double)mid_enc_info()->zero_deg,
-               (unsigned)mid_enc_info()->dir);
+               (unsigned)mid_enc_info()->dir,
+               (bsp_ssi_cfg_error() != 0u) ? " (DMA CH MISMATCH, SPI DISABLED)" : "");
     log_printf(" cur  = Rs=%u mOhm x%u, %u uA/LSB, +-%u mA",
                (unsigned)(RSHUNT_OHM * 1000.0f + 0.5f), (unsigned)INA240_GAIN,
                (unsigned)(CUR_A_PER_LSB * 1000000.0f + 0.5f),
@@ -401,8 +403,9 @@ void app_init(void)
             log_printf(" cal  = none, will calibrate at first start");
         }
     }
-    log_printf(" uart = %u baud, VOFA+ = FireWater",
-               (unsigned)DBG_UART_BAUD);
+    log_printf(" uart = %u baud (USART2 -> CH340N), VOFA+ = FireWater%s",
+               (unsigned)DBG_UART_BAUD,
+               (bsp_uart_cfg_error() != 0u) ? " (CFG MISMATCH)" : "");
     log_printf("---------------------------------------------");
     log_printf(" KEY -> LED toggle");
     log_printf(" type 'help' for the command list");
