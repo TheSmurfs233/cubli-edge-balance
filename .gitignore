@@ -1,0 +1,33 @@
+# ---- 本工程临时产物 ----
+.tmp_env/
+sim/__pycache__/
+__pycache__/
+*.pyc
+
+# ---- 参考材料（体积大 / 含嵌套 git，不提交）----
+ref_pro/
+
+# ---- Keil 构建产物 ----
+MDK-ARM/Objects/
+MDK-ARM/Listings/
+MDK-ARM/DebugConfig/
+MDK-ARM/RTE/
+MDK-ARM/*.log
+*.uvguix.*
+*.uvoptx.bak
+*.dep
+*.crf
+*.o
+*.d
+*.axf
+*.hex
+*.bin
+*.map
+*.htm
+*.lnp
+*.lst
+
+# ---- 系统 ----
+Thumbs.db
+desktop.ini
+.DS_Store
