@@ -156,6 +156,8 @@ static void print_help(void)
     log_printf(" cal [erase]    zero-drift calibration (needs start), erase = wipe");
     log_printf(" prof [reset|on|off]  per-stage timing profile (DWT)");
     log_printf(" imu            IMU link health and the last attitude frame");
+    log_printf(" imu rate <hz> [save]  set the 0x41 AHRS packet rate (10..200)");
+    log_printf(" imu cfg <text> forward one ASCII config command (e.g. imu cfg #fmsg)");
     log_printf(" phase [reset]  where each step lands in the 50us PWM period");
     log_printf(" trig           benchmark the sin/cos back end (LUT or CORDIC)");
     log_printf(" cordic         dump raw CORDIC readback for 4 angles");
@@ -280,16 +282,327 @@ static void print_imu(void)
     log_printf("----------------");
 }
 
+/* ---- IMU packet rate --------------------------------------------------
+ * The module ships with 0x40 (raw) and 0x41 (AHRS) at 100 Hz each.  The
+ * balance loop wants the attitude packet as fast as the link allows, so this
+ * rewrites the 0x41 rate through the ASCII config channel.  Without "save"
+ * the change is volatile and a power cycle restores 100 Hz. */
+
+/* Keep feeding the parser while the module answers: replies land in the
+ * ASCII ring only through imu_poll().  The debug UART is pumped from the main
+ * loop, which is blocked here, so it needs an explicit pump as well - without
+ * it the log ring overflows during a long config sequence and the diagnostic
+ * lines are dropped. */
+static void imu_wait(uint32_t ms)
+{
+    uint32_t t0 = HAL_GetTick();
+
+    while ((uint32_t)(HAL_GetTick() - t0) < ms) {
+        imu_poll();
+        bsp_uart_tx_pump();
+        HAL_Delay(1u);
+    }
+}
+
+static uint8_t rep_has(const uint8_t *p, uint32_t n, const char *needle)
+{
+    uint32_t nl = (uint32_t)strlen(needle);
+    uint32_t i;
+    uint32_t k;
+
+    if ((nl == 0u) || (n < nl)) { return 0u; }
+    for (i = 0u; (i + nl) <= n; i++) {
+        for (k = 0u; k < nl; k++) {
+            if (p[i + k] != (uint8_t)needle[k]) { break; }
+        }
+        if (k == nl) { return 1u; }
+    }
+    return 0u;
+}
+
+static void print_imu_reply(const uint8_t *p, uint32_t n)
+{
+    char     s[160];
+    uint32_t i;
+    uint8_t  printable = 1u;
+
+    for (i = 0u; i < n; i++) {
+        if ((p[i] < 0x20u) && (p[i] != (uint8_t)'\r') && (p[i] != (uint8_t)'\n')) {
+            printable = 0u;
+        }
+    }
+    if (printable == 0u) {
+        log_printf("imu < %u B (binary)", (unsigned)n);
+        return;
+    }
+    for (i = 0u; (i < n) && (i < ((uint32_t)sizeof(s) - 1u)); i++) {
+        char c = (char)p[i];
+        s[i] = ((c == '\r') || (c == '\n')) ? ' ' : c;
+    }
+    s[i] = '\0';
+    log_printf("imu < %s", s);
+}
+
+/* Last reply of imu_step(), kept so a caller can look for an echo after the
+ * fact (e.g. "MSG_AHRS[41]  200.0Hz" proves the rate really changed). */
+static uint8_t  s_rep[192];
+static uint32_t s_rep_len;
+
+static uint8_t imu_step(const char *cmd)
+{
+    log_printf("imu > %s", cmd);
+    s_rep_len = imu_cmd(cmd, s_rep, (uint32_t)sizeof(s_rep), IMU_CMD_TIMEOUT_MS);
+    if (s_rep_len == 0u) {
+        log_printf("imu < no reply in %u ms", (unsigned)IMU_CMD_TIMEOUT_MS);
+        return 0u;
+    }
+    print_imu_reply(s_rep, s_rep_len);
+    return rep_has(s_rep, s_rep_len, "#OK");
+}
+
+/* Decimal formatting without printf: ARMCC's snprintf pulls in a lot of code
+ * and the command strings here are short and fixed in shape. */
+static void u32_str(uint32_t v, char *dst)
+{
+    char    tmp[12];
+    uint8_t i = 0u;
+    uint8_t k;
+
+    if (v == 0u) { dst[0] = '0'; dst[1] = '\0'; return; }
+    while ((v > 0u) && (i < (uint8_t)sizeof(tmp))) {
+        tmp[i] = (char)('0' + (v % 10u));
+        v /= 10u;
+        i++;
+    }
+    for (k = 0u; k < i; k++) { dst[k] = tmp[i - 1u - k]; }
+    dst[i] = '\0';
+}
+
+/* Total parsed frames; the only honest "is the stream back" test. A frame age
+ * of a few hundred ms old still looks like "streaming" right after config mode,
+ * so the age alone reports a false success. */
+static uint32_t imu_frames(void)
+{
+    const fdilink_ctx_t *ctx = imu_ctx();
+
+    return ctx->stat.frames;
+}
+
+/* Wake the stream and wait for real frames to arrive. After #freboot the module
+ * needs ~2.3 s before it listens again, so a #fdeconfig sent immediately after
+ * the reboot lands in that window and is lost; hence the periodic re-send. */
+static uint8_t imu_wait_stream(uint32_t tries, uint32_t step_ms, uint32_t nudge_every)
+{
+    uint32_t frames0 = imu_frames();
+    uint32_t i;
+
+    for (i = 0u; i < tries; i++) {
+        if (imu_frames() > (frames0 + 2u)) { return 1u; }
+        if ((nudge_every != 0u) && (i > 0u) && ((i % nudge_every) == 0u)) {
+            log_printf("imu > #fdeconfig (stream still down, nudge it)");
+            (void)imu_send("#fdeconfig");
+        }
+        imu_wait(step_ms);
+    }
+    return (uint8_t)((imu_frames() > (frames0 + 2u)) ? 1u : 0u);
+}
+
+/* imu cfg <text>: forward one ASCII command verbatim and print the reply.
+ * Needed for every command that has no dedicated entry point (e.g. #fmsg
+ * with no arguments lists the current packet rates). */
+static void cmd_imu_cfg(const char *text)
+{
+    uint8_t  reply[192];
+    uint32_t n;
+
+    log_printf("imu > %s", text);
+    n = imu_cmd(text, reply, (uint32_t)sizeof(reply), IMU_CMD_TIMEOUT_MS);
+    if (n == 0u) {
+        log_printf("imu < no reply in %u ms", (unsigned)IMU_CMD_TIMEOUT_MS);
+        return;
+    }
+    print_imu_reply(reply, n);
+}
+
+/* Wait until the binary stream actually stops. #fconfig is acknowledged with a
+ * splice of "*#OK" and the frames still in flight, so the reply itself cannot
+ * be judged; the honest signal is that no new frame arrives any more. Only then
+ * does the module parse the next ASCII command - sending #fmsg 500 ms after
+ * #fconfig got a bare "*#OK" back and changed nothing. */
+static uint8_t imu_wait_cfg_quiet(void)
+{
+    uint32_t i;
+    uint32_t last;
+    uint32_t now_frames;
+    uint32_t same = 0u;
+
+    last = imu_frames();
+    for (i = 0u; i < 25u; i++) {          /* up to ~3.7 s */
+        imu_wait(150u);
+        now_frames = imu_frames();
+        if (now_frames == last) {
+            same++;
+            if (same >= 3u) { return 1u; } /* 450 ms without a frame */
+        } else {
+            same = 0u;
+            last = now_frames;
+        }
+    }
+    return 0u;
+}
+
+/* A rate reply is good only when the MSG_AHRS line carries a real value. Do
+ * not test for the text "0.0Hz": it is a substring of "100.0Hz" and
+ * "200.0Hz", which made every good echo look like a rejected one. Parse the
+ * field instead: after "MSG_AHRS[41]" the value must start with 1..9, so an
+ * out-of-range setting ("0.0Hz", e.g. 300 Hz) is the only rejected shape. */
+static uint8_t imu_echo_ok(void)
+{
+    uint32_t i;
+    uint32_t j;
+
+    for (i = 0u; (i + 8u) <= s_rep_len; i++) {
+        if (rep_has(&s_rep[i], 8u, "MSG_AHRS") != 0u) { break; }
+    }
+    if ((i + 8u) > s_rep_len) { return 0u; }
+    j = i + 8u;
+    while ((j < s_rep_len) && (s_rep[j] != (uint8_t)']')) { j++; }
+    if (j >= s_rep_len) { return 0u; }
+    j++;
+    while ((j < s_rep_len) && (s_rep[j] == (uint8_t)' ')) { j++; }
+    if (j >= s_rep_len) { return 0u; }
+    return ((s_rep[j] >= (uint8_t)'1') && (s_rep[j] <= (uint8_t)'9')) ? 1u : 0u;
+}
+
+/* The module needs LINE SILENCE between #fconfig and the next command: 500 ms
+ * after the *#OK a #fmsg is answered with a bare "*#OK" and ignored, and so is
+ * a second and third one - every early command seems to restart the quiet
+ * period. With ~2 s of nothing on the wire the rate table comes back and the
+ * change sticks (verified against the module on 2026-11-04). */
+static void imu_wait_line_quiet(void)
+{
+    imu_wait(2000u);
+}
+
+static void cmd_imu_rate(const char *hz_arg, uint8_t do_save)
+{
+    char     cmd[32];
+    uint8_t  reply[192];
+    uint32_t hz;
+    uint32_t n;
+
+    if (parse_u32(hz_arg, &hz) == 0u) {
+        log_printf("ERR usage=imu rate <10..200> [save]");
+        return;
+    }
+    /* 200 Hz is the module's own ceiling: #fmsg 41 300 is answered with
+     * "MSG_AHRS[41] 0.0Hz" and quietly ignored (measured 2026-11-04). */
+    if ((hz < 10u) || (hz > 200u)) {
+        log_printf("ERR usage=imu rate <10..200> [save]");
+        return;
+    }
+    log_printf("imu rate: 0x41 (AHRS) -> %u Hz, 0x40 (raw) untouched", (unsigned)hz);
+
+    /* Enter config mode, then wait for the stream to actually stop: the reply
+     * to #fconfig is normally mixed with frames still in flight, and the next
+     * ASCII command is swallowed until the module is really in config mode. */
+    (void)imu_step("#fconfig");
+    if (imu_wait_cfg_quiet() == 0u) {
+        log_printf("imu rate: the stream never stopped, module not responding");
+        imu_exit_config_mode();
+        return;
+    }
+    imu_wait(300u);
+    imu_wait_line_quiet();
+    log_printf("imu rate: module is in config mode");
+
+    strcpy(cmd, "#fmsg 41 ");
+    u32_str(hz, &cmd[9]);
+    /* A bare "*#OK" is not proof: only the echo of the new rate is. */
+    if ((imu_step(cmd) != 0u) && (imu_echo_ok() != 0u)) {
+        log_printf("imu rate: module echoed the new rate");
+    } else {
+        log_printf("imu rate: WARNING #fmsg gave no rate echo, retrying once");
+        imu_wait_line_quiet();
+        if ((imu_step(cmd) != 0u) && (imu_echo_ok() != 0u)) {
+            log_printf("imu rate: module echoed the new rate on retry");
+        } else {
+            log_printf("imu rate: WARNING rate not confirmed by the module");
+        }
+    }
+
+    /* Read the rate table back: definitive proof of the pending setting. */
+    imu_wait_line_quiet();
+    if (imu_step("#fmsg") != 0u) {
+        log_printf("imu rate: table read back above");
+    }
+
+    if (do_save != 0u) {
+        imu_wait_line_quiet();
+        (void)imu_step("#fsave");
+        /* #fsave writes flash.  A #freboot only 400 ms later was accepted with
+         * *#OK but the new rate was gone after the reboot; with 2500 ms of
+         * quiet before the reboot the readback table and the rebooted stream
+         * both came back at the new rate.  So: do not rush the reboot. */
+        imu_wait(2500u);
+        log_printf("imu > #freboot");
+        n = imu_cmd("#freboot", reply, (uint32_t)sizeof(reply), 800u);
+        if (n > 0u) {
+            print_imu_reply(reply, n);
+        }
+        /* Only answer "y" when the prompt was actually seen: an unneeded y
+         * returns *#ERROR, a missing one leaves the module stuck. */
+        if ((n > 0u) && (rep_has(reply, n, "(y/n)") != 0u)) {
+            log_printf("imu > y");
+            (void)imu_send("y");
+            imu_wait(400u);
+            (void)imu_send("y");
+            imu_wait(800u);
+        } else if (n == 0u) {
+            log_printf("imu > y (no reply, assume y/n prompt)");
+            (void)imu_send("y");
+            imu_wait(400u);
+        } else {
+            imu_wait(400u);
+        }
+        /* Wake the stream before waiting for frames: #fdeconfig also clears
+         * the local ASCII flag, so binary frames are parsed again. Then retry
+         * every 2 s for up to 30 s (the reboot itself takes ~2.3 s). */
+        log_printf("imu > #fdeconfig (wake stream)");
+        (void)imu_send("#fdeconfig");
+        imu_wait(300u);
+        if (imu_wait_stream(60u, 500u, 4u) == 0u) {
+            log_printf("imu rate: stream did not resume in 30 s");
+        }
+    } else {
+        log_printf("imu > #fdeconfig");
+        (void)imu_send("#fdeconfig");
+        imu_wait(300u);
+        if (imu_wait_stream(20u, 250u, 4u) == 0u) {
+            log_printf("imu rate: stream did not resume in 5 s");
+        }
+    }
+
+    imu_exit_config_mode();
+    if (imu_stream_ok() != 0u) {
+        log_printf("imu rate: cfg off, frames = %u; check 'imu' for the new rate",
+                   (unsigned)imu_frames());
+    } else {
+        log_printf("imu rate: cfg off but no frame yet, frames = %u",
+                   (unsigned)imu_frames());
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Dispatch                                                            */
 /* ------------------------------------------------------------------ */
 static void cmd_exec(char *line)
 {
-    char   *tok[4];
+    char   *tok[8];
     uint8_t n;
     uint32_t val;
 
-    n = split_args(line, tok, 4u);
+    n = split_args(line, tok, 8u);
     if (n == 0u) { return; }
 
     static float   s_pll_wn   = PLL_WN_HZ;
@@ -309,7 +622,31 @@ static float   s_pll_zeta = PLL_ZETA;
     }
     /* ---------------- imu ----------------- */
     else if (strcmp(tok[0], "imu") == 0) {
-        print_imu();
+        if ((n >= 2u) && (strcmp(tok[1], "rate") == 0)) {
+            if (n < 3u) {
+                log_printf("ERR usage=imu rate <10..400> [save]");
+            } else {
+                cmd_imu_rate(tok[2], (uint8_t)((n >= 4u) && (strcmp(tok[3], "save") == 0)));
+            }
+        } else if ((n >= 3u) && (strcmp(tok[1], "cfg") == 0)) {
+            char    txt[48];
+            uint8_t i;
+            uint8_t fits = 1u;
+
+            strcpy(txt, tok[2]);
+            for (i = 3u; i < n; i++) {
+                if ((strlen(txt) + strlen(tok[i]) + 2u) >= sizeof(txt)) { fits = 0u; break; }
+                strcat(txt, " ");
+                strcat(txt, tok[i]);
+            }
+            if (fits == 0u) {
+                log_printf("ERR imu cfg: command too long");
+            } else {
+                cmd_imu_cfg(txt);
+            }
+        } else {
+            print_imu();
+        }
     }
     /* ---------------- start --------------- */
     else if (strcmp(tok[0], "start") == 0) {

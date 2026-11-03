@@ -35,10 +35,14 @@
 
 ## 当前状态
 
-- 阶段：**S1 可构建基线**（方案已评审 → [40_阶段方案_S1.md](40_阶段方案_S1.md)）
-- 进度：**8 步中已完成 1~7 步**（CubeMX 工程 → 合并 `User/` → 挂进 Keil → 接回入口 → 调试口切 USART2 → 移植 IMU 链路 → 建 `test/` 全套）
-  - 构建：`0 error 0 warning`，`Code=67870 RO=2810 RW=536 ZI=14352`（Flash 55%、RAM 47%）
-  - 下一步：**步骤 8 —— 烧录上板（需请示）**，验证 `help`/`ver`/`stat`/`imu` 与 IMU 首帧
+- 阶段：**S1 可构建基线 —— ✅ 已验收（2026-11-04）**（[40_阶段方案_S1.md](40_阶段方案_S1.md)）
+- 进度：**8 步全部完成**（CubeMX 工程 → 合并 `User/` → 挂进 Keil → 接回入口 → 调试口切 USART2 →
+  移植 IMU 链路 → 建 `test/` 全套 → 烧录上板实测）
+  - 构建：`0 error 0 warning`，`Code=69760 RO=2880 RW=544 ZI=13936`（Flash 57%、RAM 47%）
+  - 上板：`ver`/`help`/`stat`/`imu`/`fault`/`vbus`/`enc`/`echo`/`prof` 全部可用；IMU `age 6 ms`、CRC 全 0
+  - **IMU 姿态已提到 200 Hz**（`imu rate 200 save`，实测 199.78 帧/s，跨断电保持）
+  - 电机带载全速段 300~2000 rpm 实测正常（2000 rpm 受电压极限钳在 1970 rpm）
+- 下一阶段：**S2 姿态链路**（`att` 命令输出俯仰角/角速度、静止噪声与漂移达标）
 - 门禁（`bash test/verify.sh` 一键跑完，全绿）：
   - 门 1 `test/check_binding.py`：11 项跨文件绑定（DMA 通道、串口实例、波特率、环形模式、纯 ASCII），已通过负向验证
   - 门 2 `test/l1/run.sh`：把 `User/Mid/mid_fdilink.c` 原样在 gcc 下编译，15 项合成帧对拍
