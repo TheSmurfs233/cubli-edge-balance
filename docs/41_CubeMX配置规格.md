@@ -27,7 +27,7 @@
 1. CubeMX 打开 `D:\Embedded\STM32\dsh_foc\myfoc.ioc`
 2. `File → Save Project As…` → 存为 `D:\Embedded\STM32\cubli\cubli.ioc`
 3. `Project Manager` 改 **Project Name = `cubli`**，确认 Toolchain/IDE = **MDK-ARM V5.32**
-4. 按第 3 节 **只做 4 处改动**：USART1 波特率、新增 USART2、新增 DMA1_CH6/CH7、USART2 中断
+4. 按第 3 节 **只做 4 处改动**：USART1 波特率、新增 USART2、新增 USART2 的两个 DMA 通道、USART2 中断
 5. `GENERATE CODE`
 
 > 路线 A 的好处：时钟树、TIM1 死区、ADC 注入组、SPI 相位这些"调对了但说不清"的项一次到位，不会漏。
@@ -149,12 +149,15 @@
 | Parity | None |
 | Stop Bits | 1 |
 | Flow Control | None |
-| **DMA RX** | **DMA1_Channel6**，**Circular**，Priority Low |
-| **DMA TX** | **DMA1_Channel7**，**Normal**，Priority Low |
+| **DMA RX** | 任一空闲 DMA1 通道（实测派到 **DMA1_Channel3**），**Circular**，Priority Low |
+| **DMA TX** | 另一空闲通道（实测 **DMA1_Channel4**），**Normal**，Priority Low |
 | **NVIC** | USART2 global interrupt **Enable**，抢占优先级 **4** |
 
 > 为什么必须先 DMA：调试口要跑命令台 + 日志 + 波形，阻塞收发会直接拖慢 20 kHz 电流环。
-> DMA 通道选择：G431 的 USART2_RX 只能落在 DMA1_CH6，USART2_TX 只能 CH7（且 CH3 已被 SPI1 占用，不能混）。
+> DMA 通道选择：G431 的 **DMA1 只有 CH1~CH6，没有 CH7**（初版本文档写 CH6/CH7 是错的）。
+> G4 带 DMAMUX，任意通道可映射任意请求，所以不必强求具体通道号；只要 CubeMX 不报冲突即可。
+> 实测 CubeMX 把 USART2_RX 派到 CH3、USART2_TX 派到 CH4，并把原来的 SPI1_RX 从 CH3 自动挪到 **CH5**。
+> 移植 `dsh_foc` 的代码时**只认句柄名**（`hdma_usart2_rx` 等），不要认通道号。
 
 ### 2.9 GPIO
 
@@ -189,8 +192,9 @@
 | DMA1_Channel1_IRQn | 2 | ✅ |
 | DMA1_Channel2_IRQn | 2 | ✅ |
 | DMA1_Channel3_IRQn | 0 | ✅ |
-| DMA1_Channel6_IRQn | 2 | ✅（新增） |
-| DMA1_Channel7_IRQn | 2 | ✅（新增） |
+| DMA1_Channel3_IRQn | 2 | ✅（USART2_RX 占用） |
+| DMA1_Channel4_IRQn | 2 | ✅（USART2_TX 占用） |
+| DMA1_Channel5_IRQn | 2 | ✅（SPI1_RX 占用） |
 | USART1_IRQn | 3 | ✅ |
 | USART2_IRQn | 4 | ✅（新增） |
 | SysTick_IRQn | 15 | ✅ |
@@ -205,7 +209,7 @@
 |---|---|---|
 | 1 | Connectivity → USART1 → Parameter Settings | Baud Rate `1000000` → **`921600`** |
 | 2 | Connectivity → USART2 | 开启 **Asynchronous**，PA2/PA3 自动分配，Baud **1000000** |
-| 3 | System Core → DMA（或 USART2 → DMA Settings） | 加 **USART2_RX = DMA1_Channel6（Circular）**、**USART2_TX = DMA1_Channel7（Normal）** |
+| 3 | USART2 → DMA Settings | 加 **USART2_RX（Circular）**、**USART2_TX（Normal）**，通道号让 CubeMX 自动分配 |
 | 4 | System Core → NVIC | 勾选 **USART2 global interrupt**，优先级 **4** |
 
 ⚠ **不要动**：时钟树、TIM1、ADC1/ADC2、SPI1、USART1 的其它参数、GPIO 已有分配。这些是 `dsh_foc` 反复实测调过的。
@@ -221,7 +225,7 @@
 | 1 | 目录 `D:\Embedded\STM32\cubli\Core\`、`Drivers\`、`MDK-ARM\` | 都存在 |
 | 2 | `MDK-ARM\` 下的工程文件 | `cubli.uvprojx` |
 | 3 | `Core\Src\usart.c` | 有 `huart1` **和** `huart2` |
-| 4 | `Core\Src\dma.c` | 有 `hdma_usart1_rx/tx` 与 `hdma_usart2_rx/tx`，通道分别为 CH1/CH2/CH6/CH7 |
+| 4 | `Core\Src\dma.c` | 有 `hdma_usart1_rx/tx` 与 `hdma_usart2_rx/tx`，5 个通道互不重复 |
 | 5 | `Core\Src\tim.c` | `Prescaler=0`、`Period=4249`、`DeadTime=4`、`CounterMode=CENTERALIGNED1` |
 | 6 | `Core\Src\adc.c` | ADC2 注入组 3 个 rank，触发源 `ADC_EXTERNALTRIGINJEC_T1_CC4` |
 | 7 | `Core\Src\spi.c` | `BaudRatePrescaler=SPI_BAUDRATEPRESCALER_16`、`CLKPhase=SPI_PHASE_2EDGE` |
