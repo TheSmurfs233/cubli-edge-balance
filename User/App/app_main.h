@@ -328,6 +328,50 @@ const app_bal_info_t *app_bal_info(void);
  * sample they print is the newest one. */
 void app_bal_update(void);
 
+/* ---------------- closed-loop orchestration (S6) ---------------- */
+/* The law stays a pure function; this layer decides when it is allowed to
+ * push, how fast the command may move, and when to cut the torque. It is the
+ * only place that calls app_torque_set() on behalf of the balance loop. */
+typedef enum {
+    BAL_ST_DISARMED = 0,  /* idle, must not drive                       */
+    BAL_ST_ARMED,         /* conditions met, waiting for a new frame    */
+    BAL_ST_RUN,           /* pushing torque                             */
+    BAL_ST_TRIP           /* stopped by an interlock, needs "bal run off" */
+} bal_run_state_t;
+
+typedef enum {
+    BAL_TRIP_NONE = 0,
+    BAL_TRIP_TILT,        /* |theta| past BAL_TRIP_DEG                   */
+    BAL_TRIP_RATE,        /* |theta_dot| past BAL_TRIP_DPS               */
+    BAL_TRIP_WHEEL,       /* |omega| past BAL_TRIP_RPM                   */
+    BAL_TRIP_STALE,       /* attitude frame too old                      */
+    BAL_TRIP_FAULT,       /* any drive fault                             */
+    BAL_TRIP_TIMEOUT,     /* BAL_MAX_MS elapsed                          */
+    BAL_TRIP_DRIVE        /* app_torque_set() refused                    */
+} bal_trip_t;
+
+typedef struct {
+    uint8_t  state;        /* bal_run_state_t                          */
+    uint8_t  trip;         /* bal_trip_t, valid when state == TRIP     */
+    uint8_t  drive_ret;    /* last app_torque_set() return code        */
+    float    tau_applied_mnm;
+    float    tau_peak_mnm; /* max |command| this run                   */
+    float    phi_peak_deg; /* max |theta| this run                     */
+    float    omega_peak_rpm;
+    uint32_t run_ms;       /* since ARM                                */
+    uint32_t frames;       /* frames that produced a new command       */
+    uint32_t sat_frames;   /* frames where the law saturated           */
+} app_bal_run_t;
+
+/* 0 = OK; 1 = attitude invalid; 2 = tilt outside ARM window;
+ * 3 = tilt rate too high; 4 = wheel spinning too fast;
+ * 5 = drive not ready (see app_bal_run()->drive_ret); 6 = already armed. */
+uint8_t app_balance_arm(uint8_t on);
+void    app_balance_update(void);
+const app_bal_run_t *app_balance_info(void);
+const char *app_balance_state_name(uint8_t st);
+const char *app_balance_trip_name(uint8_t trip);
+
 const app_phase_info_t *app_phase_info(void);
 void                    app_phase_reset(void);
 

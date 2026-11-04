@@ -160,6 +160,7 @@ static void print_help(void)
     log_printf(" imu            IMU link health and the last attitude frame");
     log_printf(" att [zero|stat <s>]  body pitch, rate, zero and noise window");
     log_printf(" bal [on|off|log <s>] balance law, shadow mode (never drives)");
+    log_printf(" bal run [on|off] closed loop with interlocks -- moves the motor");
     log_printf(" imu rate <hz> [save]  set the 0x41 AHRS packet rate (10..200)");
     log_printf(" imu cfg <text> forward one ASCII config command (e.g. imu cfg #fmsg)");
     log_printf(" phase [reset]  where each step lands in the 50us PWM period");
@@ -747,6 +748,81 @@ static void cmd_bal_log(const char *sec_arg)
     }
 }
 
+/* One line summary of the closed-loop orchestrator. Kept separate from
+ * print_bal() because the shadow law and the interlock state are two
+ * different things: the law can be perfectly valid while the run is
+ * disarmed. */
+static void print_bal_run(void)
+{
+    const app_bal_run_t    *r = app_balance_info();
+    const app_bal_info_t   *b = app_bal_info();
+    const char *sign;
+
+    log_printf("---- bal run (S6) ----");
+    log_printf(" state  = %s, trip %s, drive %u",
+               app_balance_state_name(r->state),
+               app_balance_trip_name(r->trip), (unsigned)r->drive_ret);
+    sign = (r->tau_applied_mnm < 0.0f) ? "-" : "+";
+    log_printf(" out    = %s%.2f mN.m applied, law %s%.2f mN.m, peak %s%.2f mN.m",
+               sign, (double)fabsf(r->tau_applied_mnm),
+               (b->tau_mnm < 0.0f) ? "-" : "+", (double)fabsf(b->tau_mnm),
+               (r->tau_peak_mnm < 0.0f) ? "-" : "+", (double)fabsf(r->tau_peak_mnm));
+    log_printf(" window = %u ms, frames %u, saturated %u",
+               (unsigned)r->run_ms, (unsigned)r->frames, (unsigned)r->sat_frames);
+    log_printf(" peaks  = phi %.2f deg, rate %.1f deg/s, wheel %.0f rpm",
+               (double)r->phi_peak_deg, (double)fabsf(b->dphi_dps),
+               (double)r->omega_peak_rpm);
+    log_printf(" limits = arm %.1f deg / %.0f dps / %.0f rpm, trip %.0f deg / %.0f dps / %.0f rpm",
+               (double)BAL_ARM_DEG, (double)BAL_ARM_DPS, (double)BAL_ARM_RPM,
+               (double)BAL_TRIP_DEG, (double)BAL_TRIP_DPS, (double)BAL_TRIP_RPM);
+    log_printf(" scale  = %.2f x nominal, ceiling %.0f mN.m, slew %.0f mN.m per frame, max %u ms",
+               (double)BAL_SCALE, (double)BAL_MAX_MNM, (double)BAL_SLEW_MNM_STEP,
+               (unsigned)BAL_MAX_MS);
+}
+
+/* Arm the closed-loop. Deliberately chatty: this is the one command that can
+ * put 33 mN.m into a hand-held cube, so every refusal names its reason. */
+static void cmd_bal_run_on(void)
+{
+    uint8_t r;
+
+    if (app_balance_info()->state == BAL_ST_TRIP) {
+        log_printf("ERR bal run: tripped (%s), send 'start' then retry",
+                   app_balance_trip_name(app_balance_info()->trip));
+        return;
+    }
+    if (app_status()->state != APP_ST_RUN) {
+        log_printf("ERR bal run: send 'mode 2' and 'start' first");
+        return;
+    }
+    if (app_bal_info()->on == 0u) {
+        log_printf("WARN bal law was off, turning shadow on for this run");
+    }
+
+    r = app_balance_arm(1u);
+    if (r == 0u) {
+        log_printf("OK bal run armed, max %u ms -- hand on the power switch, cube on the soft pad",
+                   (unsigned)BAL_MAX_MS);
+    } else if (r == 1u) {
+        log_printf("ERR bal run: no valid attitude frame");
+    } else if (r == 2u) {
+        log_printf("ERR bal run: tilt %.2f deg outside +-%.1f deg arm window",
+                   (double)app_bal_info()->phi_deg, (double)BAL_ARM_DEG);
+    } else if (r == 3u) {
+        log_printf("ERR bal run: tilt rate %.1f deg/s above %.0f, let it settle",
+                   (double)fabsf(app_bal_info()->dphi_dps), (double)BAL_ARM_DPS);
+    } else if (r == 4u) {
+        log_printf("ERR bal run: wheel %.0f rpm above %.0f, wait or brake it",
+                   (double)fabsf(app_bal_info()->omega_rpm), (double)BAL_ARM_RPM);
+    } else if (r == 5u) {
+        log_printf("ERR bal run: drive not ready (mode %s, spd loop %s)",
+                   app_mode_name(app_status()->mode),
+                   (app_balance_info()->drive_ret == 6u) ? "on" : "off");
+    } else {
+        log_printf("ERR bal run: already %s", app_balance_state_name(app_balance_info()->state));
+    }
+}
+
 /* Dispatch                                                            */
 /* ------------------------------------------------------------------ */
 static void print_torque(void)
@@ -832,7 +908,14 @@ static float   s_pll_zeta = PLL_ZETA;
     }
     /* ---------------- bal ----------------- */
     else if (strcmp(tok[0], "bal") == 0) {
-        if ((n >= 2u) && (strcmp(tok[1], "on") == 0)) {
+        if ((n >= 3u) && (strcmp(tok[1], "run") == 0) && (strcmp(tok[2], "on") == 0)) {
+            cmd_bal_run_on();
+        } else if ((n >= 3u) && (strcmp(tok[1], "run") == 0) && (strcmp(tok[2], "off") == 0)) {
+            (void)app_balance_arm(0u);
+            log_printf("OK bal run off, state=%s", app_balance_state_name(app_balance_info()->state));
+        } else if ((n >= 2u) && (strcmp(tok[1], "run") == 0)) {
+            print_bal_run();
+        } else if ((n >= 2u) && (strcmp(tok[1], "on") == 0)) {
             uint8_t r = app_bal_set(1u);
             if (r == 0u)      { log_printf("OK bal on (shadow: computes, does not drive)"); }
             else if (r == 2u) { log_printf("ERR bal: no attitude frame yet"); }
@@ -1946,7 +2029,7 @@ static float   s_pll_zeta = PLL_ZETA;
         } else {
             static const char *const names[PROF_SLOT_COUNT] = {
                 "isr", "isr_period", "adc_read", "conv",
-                "wave", "cmd", "txpump", "loop", "enc", "imu", "att", "bal"
+                "wave", "cmd", "txpump", "loop", "enc", "imu", "att", "bal", "balrun"
             };
             uint8_t i;
 

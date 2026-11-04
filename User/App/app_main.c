@@ -313,17 +313,37 @@ static void att_cfg_load(void)
 #define BAL_DEG2RAD     0.01745329252f
 #define BAL_RPM2RPS     0.10471975512f
 
+/* S6 threshold consistency is checked in bal_cfg_load(): ARMCC V5 and gcc both
+ * reject float operands in an integer constant expression, so the usual
+ * negative-array trick cannot express "0.4 deg < 12 deg". */
+
 static alg_bal_cfg_t  s_bal_cfg;
 static app_bal_info_t s_bal;
 static uint8_t        s_bal_on;
 
 static void bal_cfg_load(void)
 {
-    s_bal_cfg.kp_nm_rad = BAL_KP_NM_RAD;
-    s_bal_cfg.kd_nm_rps = BAL_KD_NM_RPS;
-    s_bal_cfg.kw_nm_rps = BAL_KW_NM_RPS;
+    /* BAL_SCALE is the first-flight derating: the nominal gains stay in
+     * board_cfg.h untouched so a test can raise the scale without losing the
+     * values that came out of the LQR solve. */
+    s_bal_cfg.kp_nm_rad = BAL_KP_NM_RAD * BAL_SCALE;
+    s_bal_cfg.kd_nm_rps = BAL_KD_NM_RPS * BAL_SCALE;
+    s_bal_cfg.kw_nm_rps = BAL_KW_NM_RPS * BAL_SCALE;
     s_bal_cfg.sign      = BAL_SIGN;
     s_bal_cfg.max_nm    = BAL_MAX_MNM / 1000.0f;
+
+    /* Threshold order is a safety property: ARM must sit inside TRIP, the
+     * balance ceiling must stay below the torque interface, and the stale
+     * window must be short compared with the run limit. A wrong edit here
+     * would still compile, so say it out loud at boot. */
+    if ((BAL_ARM_DEG >= BAL_TRIP_DEG) ||
+        (BAL_ARM_DPS >= BAL_TRIP_DPS) ||
+        (BAL_ARM_RPM >= BAL_TRIP_RPM) ||
+        (BAL_MAX_MNM >= TORQUE_MAX_MNM) ||
+        ((uint32_t)BAL_TRIP_STALE_MS > ((uint32_t)BAL_MAX_MS / 2u)))
+    {
+        log_printf("WARN bal: BAL_* threshold order looks wrong, check board_cfg.h");
+    }
 }
 
 void app_bal_update(void)
@@ -406,6 +426,212 @@ uint8_t app_bal_set(uint8_t on)
 const app_bal_info_t *app_bal_info(void)
 {
     return &s_bal;
+}
+
+/* ------------------------------------------------------------------ */
+/* Closed-loop orchestration (S6)                                      */
+/*                                                                     */
+/* Hard priority: TRIP > DISARMED > ARMED > RUN. Nothing here computes */
+/* the law; it only decides whether the result may reach the motor,    */
+/* how fast it may move, and when to cut it.                           */
+/* ------------------------------------------------------------------ */
+
+static app_bal_run_t s_run;
+static uint32_t      s_run_t0;
+static uint32_t      s_last_frames;
+static float         s_tau_cmd;
+
+const char *app_balance_state_name(uint8_t st)
+{
+    switch (st)
+    {
+    case BAL_ST_DISARMED: return "disarmed";
+    case BAL_ST_ARMED:    return "armed";
+    case BAL_ST_RUN:      return "run";
+    case BAL_ST_TRIP:     return "trip";
+    default:              return "?";
+    }
+}
+
+const char *app_balance_trip_name(uint8_t trip)
+{
+    switch (trip)
+    {
+    case BAL_TRIP_NONE:    return "none";
+    case BAL_TRIP_TILT:    return "tilt";
+    case BAL_TRIP_RATE:    return "rate";
+    case BAL_TRIP_WHEEL:   return "wheel";
+    case BAL_TRIP_STALE:   return "stale";
+    case BAL_TRIP_FAULT:   return "fault";
+    case BAL_TRIP_TIMEOUT: return "timeout";
+    case BAL_TRIP_DRIVE:   return "drive";
+    default:               return "?";
+    }
+}
+
+const app_bal_run_t *app_balance_info(void)
+{
+    return &s_run;
+}
+
+/* Latch a trip: torque first, power stage second. If the order were reversed,
+ * the PWM-stop edge would still be preceded by a frame of stale iq. */
+static void bal_trip(uint8_t why)
+{
+    s_run.state           = (uint8_t)BAL_ST_TRIP;
+    s_run.trip            = why;
+    s_tau_cmd             = 0.0f;
+    s_run.tau_applied_mnm = 0.0f;
+    app_torque_off();
+    app_stop();
+}
+
+uint8_t app_balance_arm(uint8_t on)
+{
+    const att_state_t *a;
+
+    if (on == 0u)
+    {
+        s_run.state           = (uint8_t)BAL_ST_DISARMED;
+        s_run.trip            = (uint8_t)BAL_TRIP_NONE;
+        s_tau_cmd             = 0.0f;
+        s_run.tau_applied_mnm = 0.0f;
+        app_torque_off();
+        return 0u;
+    }
+
+    if ((s_run.state == BAL_ST_ARMED) || (s_run.state == BAL_ST_RUN))
+    {
+        return 6u;
+    }
+
+    a = att_get();
+    if (a->valid == 0u)                              { return 1u; }
+    if (fabsf(a->theta_deg) > BAL_ARM_DEG)           { return 2u; }
+    if (fabsf(a->theta_dot_dps) > BAL_ARM_DPS)       { return 3u; }
+    if (fabsf(a->wheel_rpm) > BAL_ARM_RPM)           { return 4u; }
+
+    /* Drive readiness. app_torque_set(0) cannot answer this: a zero command is
+     * short-circuited to "off" and always succeeds, so look at the state. */
+    if (s_st.state != APP_ST_RUN)
+    {
+        s_run.drive_ret = 2u;
+        return 5u;
+    }
+    if (s_st.mode != CTRL_FOC)
+    {
+        s_run.drive_ret = 4u;
+        return 5u;
+    }
+    if (s_spd.on != 0u)
+    {
+        s_run.drive_ret = 6u;
+        return 5u;
+    }
+    s_run.drive_ret = 0u;
+
+    (void)app_bal_set(1u);       /* the orchestration needs the law running */
+
+    s_run.state          = (uint8_t)BAL_ST_ARMED;
+    s_run.trip           = (uint8_t)BAL_TRIP_NONE;
+    s_run.run_ms         = 0u;
+    s_run.frames         = 0u;
+    s_run.sat_frames     = 0u;
+    s_run.tau_peak_mnm   = 0.0f;
+    s_run.phi_peak_deg   = 0.0f;
+    s_run.omega_peak_rpm = 0.0f;
+    s_tau_cmd            = 0.0f;
+    s_run.tau_applied_mnm = 0.0f;
+    s_run_t0             = HAL_GetTick();
+    s_last_frames        = imu_ctx()->stat.frames;
+    return 0u;
+}
+
+void app_balance_update(void)
+{
+    const att_state_t *a;
+    float   tau;
+    uint8_t rc;
+
+    if ((s_run.state == BAL_ST_DISARMED) || (s_run.state == BAL_ST_TRIP))
+    {
+        return;
+    }
+
+    a = att_get();
+    s_run.run_ms = HAL_GetTick() - s_run_t0;
+
+    /* Latching interlocks run on every loop, not only on a new frame: a dead
+     * IMU must cut the torque immediately, not in up to 5 ms plus a timeout. */
+    if (app_fault_info()->code != (uint8_t)APP_FAULT_NONE)
+    {
+        bal_trip((uint8_t)BAL_TRIP_FAULT);
+        return;
+    }
+    if ((a->valid == 0u) || (imu_frame_age_ms() > (uint32_t)BAL_TRIP_STALE_MS))
+    {
+        bal_trip((uint8_t)BAL_TRIP_STALE);
+        return;
+    }
+    if (fabsf(a->theta_deg) > BAL_TRIP_DEG)
+    {
+        bal_trip((uint8_t)BAL_TRIP_TILT);
+        return;
+    }
+    if (fabsf(a->theta_dot_dps) > BAL_TRIP_DPS)
+    {
+        bal_trip((uint8_t)BAL_TRIP_RATE);
+        return;
+    }
+    if (fabsf(a->wheel_rpm) > BAL_TRIP_RPM)
+    {
+        bal_trip((uint8_t)BAL_TRIP_WHEEL);
+        return;
+    }
+    if (s_run.run_ms > (uint32_t)BAL_MAX_MS)
+    {
+        bal_trip((uint8_t)BAL_TRIP_TIMEOUT);
+        return;
+    }
+
+    /* 5 ms zero-order hold: one command per attitude frame. Applying the same
+     * frame 375 times would turn kd into a constant offset (an implicit
+     * friction term) and is exactly what the L1 model does not contain.
+     * The counter is the IMU frame counter, not att_state.seq: mid_att bumps
+     * its own seq on every call, so the main loop would look like fresh data. */
+    {
+        uint32_t frames = imu_ctx()->stat.frames;
+        if (frames == s_last_frames)
+        {
+            return;
+        }
+        s_last_frames = frames;
+    }
+
+    app_bal_update();                  /* recompute with this frame */
+    tau = s_bal.tau_mnm;
+
+    if (tau > (s_tau_cmd + BAL_SLEW_MNM_STEP)) { tau = s_tau_cmd + BAL_SLEW_MNM_STEP; }
+    if (tau < (s_tau_cmd - BAL_SLEW_MNM_STEP)) { tau = s_tau_cmd - BAL_SLEW_MNM_STEP; }
+    if (tau > BAL_MAX_MNM)                     { tau = BAL_MAX_MNM; }
+    if (tau < -BAL_MAX_MNM)                    { tau = -BAL_MAX_MNM; }
+
+    rc = app_torque_set(tau);
+    s_run.drive_ret = rc;
+    if (rc != 0u)
+    {
+        bal_trip((uint8_t)BAL_TRIP_DRIVE);
+        return;
+    }
+
+    s_tau_cmd             = tau;
+    s_run.state           = (uint8_t)BAL_ST_RUN;
+    s_run.tau_applied_mnm = tau;
+    s_run.frames++;
+    if (s_bal.saturated != 0u)                    { s_run.sat_frames++; }
+    if (fabsf(tau) > s_run.tau_peak_mnm)          { s_run.tau_peak_mnm = fabsf(tau); }
+    if (fabsf(a->theta_deg) > s_run.phi_peak_deg) { s_run.phi_peak_deg = fabsf(a->theta_deg); }
+    if (fabsf(a->wheel_rpm) > s_run.omega_peak_rpm) { s_run.omega_peak_rpm = fabsf(a->wheel_rpm); }
 }
 
 /* Init                                                                */
@@ -2783,6 +3009,10 @@ void app_loop(void)
     t = bsp_prof_now();
     app_bal_update();        /* S4 shadow: compute only, never drives */
     bsp_prof_add(PROF_BAL, t);
+
+    t = bsp_prof_now();
+    app_balance_update();    /* S6: interlocked, only the ARMED/RUN path drives */
+    bsp_prof_add(PROF_BALRUN, t);
 
     task_adc();
     task_enc_slow(now);

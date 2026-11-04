@@ -3142,13 +3142,15 @@ static void test_bal(void)
     T(app_bal_info()->on == 1u);
     section_end();
 
-    section("bal: the law output is kp * phi");
+    section("bal: the law output is kp * phi * BAL_SCALE");
     app_att_update();
     app_bal_update();
     b = app_bal_info();
     T(b->valid == 1u);
-    T(fabsf(b->tau_mnm - 12.71f) < 0.5f);
-    T(fabsf(b->tau_kp_mnm - 12.71f) < 0.5f);
+    /* The first-flight derating is applied when the tuning is loaded, so the
+     * expected value follows BAL_SCALE instead of the nominal 12.71 mN.m. */
+    T(fabsf(b->tau_mnm - (12.71f * BAL_SCALE)) < 0.5f);
+    T(fabsf(b->tau_kp_mnm - (12.71f * BAL_SCALE)) < 0.5f);
     T(b->saturated == 0u);
     section_end();
 
@@ -3190,6 +3192,160 @@ static void test_bal(void)
 }
 
 /* ================================================================== */
+/* S6: closed-loop orchestration. The law itself is covered above and by   */
+/* test/l1/bal_test.c; here the question is only "may the result reach the */
+/* motor, and for how long".                                               */
+static void s6_pump(void)
+{
+    app_att_update();       /* body pitch from the newest 0x41 frame */
+    app_bal_update();       /* S4 law, shadow                   */
+    app_balance_update();   /* S6 interlocks and torque out     */
+}
+
+static void test_s6(void)
+{
+    const app_bal_run_t *r;
+
+    section("s6: refuses before the bridge runs");
+    cmd_feed("stop\r\n");
+    tx_clear();
+    cmd_feed("bal run on\r\n");
+    pump_all();
+    T(tx_contains("send 'mode 2' and 'start' first"));
+    T(app_balance_info()->state == BAL_ST_DISARMED);
+    section_end();
+
+    section("s6: arms inside the window");
+    cmd_feed("mode 2\r\n");
+    force_current_ready();
+    cmd_feed("start\r\n");
+    att_feed(0.5f, 70u);
+    s6_pump();
+    tx_clear();
+    cmd_feed("bal run on\r\n");
+    pump_all();
+    T(tx_contains("OK bal run armed"));
+    r = app_balance_info();
+    T(r->state == BAL_ST_ARMED);
+    T(app_bal_info()->on == 1u);            /* the law was turned on for us */
+    section_end();
+
+    section("s6: one command per attitude frame");
+    s6_pump();                              /* same seq: must not re-apply */
+    T(app_balance_info()->frames == 0u);
+    att_feed(1.0f, 71u);
+    s6_pump();
+    T(app_balance_info()->frames == 1u);
+    T(app_balance_info()->state == BAL_ST_RUN);
+    T(app_torque_get() > 0.0f);             /* the loop really drives now */
+    section_end();
+
+    section("s6: the slew limiter caps the first step");
+    /* The limiter bounds the change per frame, not the absolute value: 6 deg at
+     * 0.4x scale asks for ~30 mN.m against ~5 mN.m already applied. */
+    {
+        float prev = app_balance_info()->tau_applied_mnm;
+        att_feed(6.0f, 72u);
+        s6_pump();
+        T(fabsf(app_balance_info()->tau_applied_mnm - prev) <= (BAL_SLEW_MNM_STEP + 0.01f));
+        T(fabsf(app_balance_info()->tau_applied_mnm) <= (BAL_MAX_MNM + 0.01f));
+        T(app_balance_info()->frames == 2u);
+    }
+    section_end();
+
+    section("s6: trip on tilt cuts torque and power");
+    att_feed((BAL_TRIP_DEG + 3.0f), 73u);
+    s6_pump();
+    r = app_balance_info();
+    T(r->state == BAL_ST_TRIP);
+    T(r->trip == (uint8_t)BAL_TRIP_TILT);
+    T(app_torque_get() == 0.0f);
+    T(app_status()->state == APP_ST_IDLE);  /* app_stop() ran */
+    section_end();
+
+    section("s6: a tripped loop refuses to re-arm without a restart");
+    tx_clear();
+    cmd_feed("bal run on\r\n");
+    pump_all();
+    T(tx_contains("tripped (tilt)"));
+    section_end();
+
+    section("s6: trip on stale attitude");
+    cmd_feed("bal run off\r\n");   /* clear the tilt latch first */
+    cmd_feed("mode 2\r\n");
+    cmd_feed("start\r\n");
+    att_feed(0.2f, 74u);
+    s6_pump();
+    tx_clear();
+    cmd_feed("bal run on\r\n");
+    pump_all();
+    T(tx_contains("OK bal run armed"));
+    fake_tick_add((uint32_t)BAL_TRIP_STALE_MS + 20u);
+    app_balance_update();                   /* no new frame: the age guard runs anyway */
+    r = app_balance_info();
+    T(r->state == BAL_ST_TRIP);
+    T(r->trip == (uint8_t)BAL_TRIP_STALE);
+    T(app_torque_get() == 0.0f);
+    section_end();
+
+    section("s6: trip on the run time limit");
+    cmd_feed("bal run off\r\n");   /* clear the stale latch first */
+    cmd_feed("mode 2\r\n");
+    cmd_feed("start\r\n");
+    att_feed(0.2f, 75u);
+    s6_pump();
+    tx_clear();
+    cmd_feed("bal run on\r\n");
+    pump_all();
+    T(tx_contains("OK bal run armed"));
+    fake_tick_add((uint32_t)BAL_MAX_MS + 100u);
+    att_feed(0.2f, 76u);      /* keep the attitude fresh so the age guard is not first */
+    s6_pump();
+    r = app_balance_info();
+    T(r->state == BAL_ST_TRIP);
+    T(r->trip == (uint8_t)BAL_TRIP_TIMEOUT);
+    section_end();
+
+    section("s6: arm refuses an angle outside the window");
+    cmd_feed("bal run off\r\n");   /* clear the trip flag */
+    cmd_feed("mode 2\r\n");
+    cmd_feed("start\r\n");
+    att_feed((BAL_ARM_DEG + 2.0f), 77u);
+    s6_pump();
+    tx_clear();
+    cmd_feed("bal run on\r\n");
+    pump_all();
+    T(tx_contains("deg outside"));
+    T(app_balance_info()->state == BAL_ST_DISARMED);
+    section_end();
+
+    section("s6: run off returns to disarmed");
+    att_feed(0.3f, 77u);
+    s6_pump();
+    tx_clear();
+    cmd_feed("bal run on\r\n");
+    pump_all();
+    T(tx_contains("OK bal run armed"));
+    tx_clear();
+    cmd_feed("bal run off\r\n");
+    pump_all();
+    T(tx_contains("OK bal run off"));
+    T(app_balance_info()->state == BAL_ST_DISARMED);
+    T(app_torque_get() == 0.0f);
+    section_end();
+
+    section("s6: the run block is printed");
+    tx_clear();
+    cmd_feed("bal run\r\n");
+    pump_all();
+    T(tx_contains("---- bal run (S6) ----"));
+    T(tx_contains("disarmed"));
+    section_end();
+
+    cmd_feed("stop\r\n");
+}
+
+/* ================================================================== */
 static void banner_reset(void)
 {
     /* app_init() prints a boot banner that is still sitting in the firmware
@@ -3225,6 +3381,7 @@ int main(void)
     printf("\n[attitude layer]\n");  test_att();
     printf("\n[torque interface]\n"); test_torque();
     printf("\n[balance law]\n");      test_bal();
+    printf("\n[balance loop]\n");     test_s6();
 
     printf("\n============================\n");
     printf("checks: %d   failed: %d\n", g_checks, g_fails);

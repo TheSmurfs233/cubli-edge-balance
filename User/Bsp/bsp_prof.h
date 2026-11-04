@@ -41,6 +41,7 @@ typedef enum {
     PROF_IMU,            /* imu_poll(): drain USART1 ring + FDILink parse   */
     PROF_ATT,            /* app_att_update(): 0x41 frame -> body pitch      */
     PROF_BAL,            /* app_bal_update(): balance law, shadow only      */
+    PROF_BALRUN,         /* app_balance_update(): interlocks + torque out   */
     PROF_SLOT_COUNT
 } prof_slot_t;
 

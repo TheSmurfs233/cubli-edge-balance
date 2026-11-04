@@ -673,6 +673,44 @@ extern "C" {
 #define BAL_MAX_MNM             33.0f
 
 /* ==========================================================================
+ * 7e. Closed-loop orchestration (S6)
+ *
+ * The law itself is a pure function; everything that can hurt the machine
+ * lives here: when it may start, when it must stop, and how fast the command
+ * may move. Thresholds are compared against the values mid_att and mid_enc
+ * already publish, so they read like the screens: degrees, deg/s, rpm.
+ * ========================================================================== */
+
+/* First-flight derating. 1.0 = the L1 gains above. Measured capture window
+ * (sim/s6_scale_scan.py, nominal inertia, release from rest):
+ *   0.4x -> 0.00 deg   0.5x -> 1.50   0.6x -> 3.75   0.7x -> 4.50 (4.25 with
+ *   10 ms of extra latency). 0.4x was the original choice and it cannot catch
+ *   anything at all, so the derating is 0.7x: still softer than nominal on the
+ *   first run, but provably able to hold the ARM window below.
+ * Raise to 1.0 only after the direction has been proven (docs/18 T19). */
+#define BAL_SCALE               0.7f
+
+/* ARM window: all four must hold before the loop is allowed to push.
+ * 2.5 deg leaves 1.25 deg of margin against the 3.75 deg capture of 0.7x. */
+#define BAL_ARM_DEG             2.5f
+#define BAL_ARM_DPS             30.0f   /* do not take over a fast fall     */
+#define BAL_ARM_RPM             300.0f  /* wheel should be near standstill  */
+
+/* TRIP thresholds: any one of them ends the run within one attitude frame. */
+#define BAL_TRIP_DEG            12.0f   /* 2.73 deg already saturates       */
+#define BAL_TRIP_DPS            200.0f
+#define BAL_TRIP_RPM            1200.0f /* 700 rpm of torque headroom (L-12)*/
+#define BAL_TRIP_STALE_MS       50u     /* 10 frames at 200 Hz              */
+
+/* Slew: commanded torque may move at most this much per 5 ms frame. 10 mN.m
+ * per frame is 2000 mN.m/s, i.e. full scale in 16.5 ms - fast against the
+ * 1.2 Hz closed loop, slow enough not to excite the frame. */
+#define BAL_SLEW_MNM_STEP       10.0f
+
+/* Automatic stop. S6a first flights use 3 s; the no-cable runs raise it. */
+#define BAL_MAX_MS              3000u
+
+/* ==========================================================================
  * 8. Motor parameters -> moved to motor_cfg.h (S10.0)
  *
  * Everything that changes when the motor changes lives in that one file:
