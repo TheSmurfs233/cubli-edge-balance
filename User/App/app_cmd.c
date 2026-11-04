@@ -672,8 +672,10 @@ static void cmd_att_stat(const char *sec_arg)
     log_printf("att stat %u s: n=%u, invalid=%u", (unsigned)sec, (unsigned)n, (unsigned)bad);
     log_printf(" min=%.2f max=%.2f pp=%.2f mean=%.2f deg",
                (double)mn, (double)mx, (double)(mx - mn), (double)(sum / (float)n));
-    log_printf(" drift = %+.2f deg over the window (first %.2f -> last %.2f)",
-               (double)(last - first), (double)first, (double)last);
+    /* No "+" flag in the mini printf: build the sign by hand. */
+    log_printf(" drift = %s%.2f deg over the window (first %.2f -> last %.2f)",
+               ((last - first) < 0.0f) ? "-" : "+", (double)fabsf(last - first),
+               (double)first, (double)last);
 }
 
 /* Dispatch                                                            */
