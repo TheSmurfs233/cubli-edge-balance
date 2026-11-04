@@ -38,6 +38,12 @@ typedef struct
   float ff_nm;       /**< friction feed-forward magnitude, N.m; 0 = off */
   float ff_deadband_rps; /**< |wheel speed| below which the ff sign is
                               kept from the previous call, rad/s       */
+  float trim_deg;        /**< initial zero trim, deg (positive = lean back) */
+  float trim_clamp_deg;  /**< adaptation is clamped to +-this, deg     */
+  float trim_gate_deg;   /**< adapt only while |phi| stays under this  */
+  float trim_adapt_k;    /**< deg/s per mN.m of low-passed command;
+                              0 = freeze the trim (see alg_bal_adapt)  */
+  float trim_adapt_tau_s;/**< low-pass time constant on the command, s */
 } alg_bal_cfg_t;
 
 /**
@@ -51,6 +57,7 @@ typedef struct
   float phi_rad;     /**< input echo: body tilt away from upright */
   float dphi_rps;    /**< input echo: body tilt rate              */
   float omega_rps;   /**< input echo: wheel speed relative body   */
+  float trim_deg;    /**< zero trim in use this cycle, deg        */
   uint8_t saturated; /**< 1 = limit hit this cycle                */
   uint8_t deadband;  /**< 1 = command was rounded to zero          */
   uint32_t steps;    /**< number of evaluations since init/reset  */
@@ -74,6 +81,27 @@ void alg_bal_step(float phi_rad, float dphi_rps, float omega_rps,
 
 /** @brief Last output (never NULL; zeroed before the first step). */
 const alg_bal_out_t *alg_bal_get(void);
+
+/**
+  * @brief  Advance the slow zero trim by dt (call once per new attitude frame).
+  *
+  * A constant external torque (a cable, a hand, a slightly wrong zero) shows up
+  * as a constant command, and a constant command is wheel speed: the wheel runs
+  * away until the speed trip. Leaning the zero lets gravity carry that torque
+  * instead. The trim moves against the low-passed command at trim_adapt_k deg/s
+  * per mN.m, only while |phi| < trim_gate_deg, and stays inside
+  * +-trim_clamp_deg. trim_adapt_k = 0 freezes it (docs/45 4.12).
+  *
+  * @param  dt_s  time since the previous call, s (>0)
+  */
+void alg_bal_adapt(float dt_s);
+
+/** @brief Set the trim directly (runtime "bal trim <deg>"), clamped. Returns
+    the value actually used, deg. */
+float alg_bal_trim_set(float deg);
+
+/** @brief Current trim, deg. */
+float alg_bal_trim_deg(void);
 
 /** @brief 1 = a valid tuning set has been loaded. */
 uint8_t alg_bal_ready(void);

@@ -82,7 +82,10 @@ def simulate(kp, kd, kw, inertia, phi0_deg, t_end=10.0, dt=5e-3,
              dither_mnm=0.0, dither_hz=60.0, trim_k=0.0, slew_mnm_step=0.0,
              trim_gate_deg=2.0, trim_clamp_deg=1.0,
              bias_k_mnm_per_rps=0.0, bias_clamp_mnm=3.0, bias_gate_deg=2.0,
-             ff_mnm=0.0, ff_deadband_rps=0.5):
+             ff_mnm=0.0, ff_deadband_rps=0.5,
+             trim_db_rpm=0.0, ext_mnm=0.0, trim_rate_dps=0.0,
+             trim_u_k=0.0, trim_u_tau_s=0.5,
+             u_max_mnm=0.0, trip_rpm=0.0):
     """One run at 200 Hz with ZOH, torque saturation, friction, gyro bias.
 
     ki != 0 adds the optional fourth state z = integral(omega) [rad], used by the
@@ -94,6 +97,9 @@ def simulate(kp, kd, kw, inertia, phi0_deg, t_end=10.0, dt=5e-3,
       dither_mnm      peak amplitude of a square dither added to the command
       dither_hz       dither frequency
       trim_k          angle-zero adaptation: trim' = trim_k * omega [rad/s]
+      trim_db_rpm     if > 0, adapt with sign(omega) instead and only above this
+                      wheel speed (the slow trim used for S6b, docs/46)
+      ext_mnm         constant external torque on the body in mN.m (cable pull)
       slew_mnm_step   max change of the command per control period [mN.m]
     """
     i_tot = inertia + J_W
@@ -102,6 +108,7 @@ def simulate(kp, kd, kw, inertia, phi0_deg, t_end=10.0, dt=5e-3,
     omega = omega0
     z = 0.0
     trim = 0.0
+    u_lp = 0.0
     bias = 0.0
     ff_sgn = 0.0
     u_prev = 0.0
@@ -114,7 +121,8 @@ def simulate(kp, kd, kw, inertia, phi0_deg, t_end=10.0, dt=5e-3,
     for k in range(steps):
         phi_m = phi + math.radians(phi_offset_deg + rng.randn() * noise_deg)
         dphi_m = dphi + math.radians(bias_dps + rng.randn() * noise_deg * 10.0)
-        u = kp * (phi_m - trim) + kd * dphi_m + kw * omega + ki * z + bias * 1e-3
+        u_law = kp * (phi_m - trim) + kd * dphi_m + kw * omega + ki * z + bias * 1e-3
+        u = u_law
         if ff_mnm > 0.0:
             # friction feed-forward: the motor must supply the friction torque
             # itself, so the LQR does not have to buy it with wheel speed.
@@ -133,21 +141,26 @@ def simulate(kp, kd, kw, inertia, phi0_deg, t_end=10.0, dt=5e-3,
         if abs(u) < TAU_MIN:
             u = 0.0
         u = max(-TAU_MAX, min(TAU_MAX, u))
+        if u_max_mnm > 0.0:
+            # firmware ceiling (BAL_MAX_MNM), below the physical torque limit
+            um = u_max_mnm * 1e-3
+            u = max(-um, min(um, u))
         delay_buf.append(u)
         u = delay_buf.pop(0) if len(delay_buf) > delay_steps else 0.0
         for _ in range(n_sub):
             cap = tau_limit(omega)
             tau = max(-cap, min(cap, u))
+            ext = ext_mnm * 1e-3
             stick = (abs(omega) < OMEGA_STICK) and (abs(tau) <= TAU_FRIC)
             if stick:
                 # static friction holds the wheel to the body: no relative motion,
                 # bearing carries the motor torque, the body+wheel act as one rigid body
                 fr = tau
-                phi_dd = (MGH * math.sin(phi) - tau + fr) / i_tot
+                phi_dd = (MGH * math.sin(phi) - tau + fr + ext) / i_tot
                 omega_dd = 0.0
             else:
                 fr = TAU_FRIC * (1.0 if omega >= 0.0 else -1.0)
-                phi_dd = (MGH * math.sin(phi) - tau + fr) / i_tot
+                phi_dd = (MGH * math.sin(phi) - tau + fr + ext) / i_tot
                 omega_dd = (tau - fr) / J_W - phi_dd
             phi += dphi * h
             dphi += phi_dd * h
@@ -157,7 +170,28 @@ def simulate(kp, kd, kw, inertia, phi0_deg, t_end=10.0, dt=5e-3,
             # brake wind-up: while the wheel turns forward we must LOWER the
             # command, so the integral accumulates -omega (see docs/46)
             z -= omega * dt
-        if trim_k > 0.0 and abs(math.degrees(phi)) < trim_gate_deg:
+        if trim_u_k > 0.0:
+            # Lean on the disturbance instead of fighting it: a constant external
+            # torque shows up as a constant command, so move the zero until the
+            # command (and therefore the wheel speed it buys) goes away.
+            u_lp = u_lp + (u_law * 1e3 - u_lp) * dt / trim_u_tau_s
+            if abs(math.degrees(phi)) < trim_gate_deg:
+                # sign: a positive command means the loop is holding the body
+                # against a forward push, so the zero must move BACKWARD to let
+                # gravity carry that load (mgh*sin(trim) = -ext - tau_f).
+                trim += math.radians(-trim_u_k * u_lp) * dt
+                lim = math.radians(trim_clamp_deg)
+                trim = max(-lim, min(lim, trim))
+        if trim_rate_dps > 0.0 and abs(math.degrees(phi)) < trim_gate_deg and abs(rpm) > trim_db_rpm:
+            # Slow zero trim used by S6b (docs/46): while the wheel keeps turning
+            # one way the zero has to move, otherwise the LQR pays for the cable
+            # disturbance with wheel speed until the 1700 rpm trip. Rate limited
+            # in deg/s, gated on a small body angle, clamped, so it cannot push
+            # the body over during a capture.
+            trim += math.radians(trim_rate_dps) * (1.0 if omega > 0.0 else -1.0) * dt
+            lim = math.radians(trim_clamp_deg)
+            trim = max(-lim, min(lim, trim))
+        elif trim_k > 0.0 and abs(math.degrees(phi)) < trim_gate_deg:
             # angle-zero adaptation: raise the trim while the wheel turns
             # forward so the command drops and the wheel slows down.
             # Gated on the body angle: with a large tilt the wheel-speed loop

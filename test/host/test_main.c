@@ -3192,7 +3192,8 @@ static void test_bal(void)
     app_bal_update();
     /* theta - trim = 0.7 deg -> 12.71 * 0.7 * BAL_SCALE mN.m */
     T(fabsf(app_bal_info()->tau_mnm - (12.71f * 0.7f * BAL_SCALE)) < 0.5f);
-    T(fabsf(app_bal_info()->trim_deg - 0.3f) < 0.001f);
+    /* The slow adapter is live too, so allow what one 5 ms frame can move. */
+    T(fabsf(app_bal_info()->trim_deg - 0.3f) < 0.01f);
     section_end();
 
     section("bal: the trim is clamped and can be read back");

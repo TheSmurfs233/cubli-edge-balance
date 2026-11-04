@@ -698,6 +698,25 @@ extern "C" {
 #define BAL_TRIM_DEG            0.0f
 #define BAL_TRIM_MAX_DEG        2.0f
 
+/* Slow zero adaptation (docs/45 4.12). A constant external torque -- the USB
+ * cable is 2~4 mN.m -- shows up as a constant command, and a constant command
+ * is wheel speed, so the wheel reaches the 1700 rpm trip in a few seconds
+ * (measured 6.1 s on 2026-11-04). Leaning the zero lets gravity carry that
+ * torque instead of the wheel.
+ *   trim' = -k * LP(command)   [deg/s], k in deg/s per mN.m
+ * LP is a first-order filter of the law output (before feed-forward), so the
+ * balancing action itself does not move the trim. Gated on |phi| and clamped:
+ * a trim change while the body is still being caught would lean it over.
+ * sim/t20_trim.py, 120 s, 2 mN.m cable pull: k = 0.1 keeps |phi| under 0.62 deg,
+ * wheel peak 650 rpm, residual +289 rpm instead of +956 rpm with k = 0; k >= 0.3
+ * falls. 0 disables the adaptation and leaves the manual trim in charge. */
+#define BAL_TRIM_ADAPT_K        0.1f
+#define BAL_TRIM_ADAPT_TAU_S    0.5f
+#define BAL_TRIM_GATE_DEG       3.0f
+
+/* Attitude frame period: the adaptation is advanced once per new 0x41 frame. */
+#define BAL_FRAME_DT_S          0.005f
+
 /* ==========================================================================
  * 7e. Closed-loop orchestration (S6)
  *
@@ -734,10 +753,14 @@ extern "C" {
                                          * loop could show anything. */
 #define BAL_TRIP_STALE_MS       50u     /* 10 frames at 200 Hz              */
 
-/* Slew: commanded torque may move at most this much per 5 ms frame. 10 mN.m
- * per frame is 2000 mN.m/s, i.e. full scale in 16.5 ms - fast against the
- * 1.2 Hz closed loop, slow enough not to excite the frame. */
-#define BAL_SLEW_MNM_STEP       10.0f
+/* Slew: commanded torque may move at most this much per 5 ms frame. The step
+ * size is also a current step: 10 mN.m/frame is 0.35 A per frame, and the
+ * 20 kHz PI overshoots on such a jump by roughly the step itself - measured
+ * 1314 mA against FOC_I_TRIP_A 1280 mA while the law ramped from 0 to the
+ * ceiling, so the board tripped on overcurrent in the middle of a normal
+ * capture. 3 mN.m/frame (0.104 A) keeps the excursion inside the ripple
+ * budget; full scale now takes 50 ms, still fast against the 1.2 Hz loop. */
+#define BAL_SLEW_MNM_STEP       3.0f
 
 /* Automatic stop. A hand-held start needs a long window: the operator has to
  * let go, and a 3 s window expires while the hand is still on the cube (measured
