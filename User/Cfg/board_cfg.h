@@ -673,9 +673,15 @@ extern "C" {
  * Keep it an explicit switch so that test flips one number, not a formula. */
 #define BAL_SIGN                1.0f
 
-/* Command ceiling. One mN.m below TORQUE_MAX_MNM so the balance law's own
- * limit always binds before the torque interface rejects the request. */
-#define BAL_MAX_MNM             33.0f
+/* Command ceiling. Below TORQUE_MAX_MNM, and below the level where the
+ * switching ripple makes the instantaneous phase peak cross FOC_I_TRIP_A.
+ * The trip compares the phase peak against 1.28 A with a 5-frame debounce, so
+ * the budget is iq + ripple/2. With L = 0.5 mH and 20 kHz the worst-case
+ * ripple is 0.30 A pp at 12 V, 0.35 A at 14 V (4S measured) and 0.42 A at the
+ * 16.8 V full charge, so a 33 mN.m ceiling (iq 1.14 A) peaked at 1.32 A and
+ * tripped the board while the law was saturated (measured 2026-11-04,
+ * sim/s6_ripple.py). 28 mN.m keeps the peak at 1.18 A even at 16.8 V. */
+#define BAL_MAX_MNM             28.0f
 
 /* Friction feed-forward (docs/45 4.8, docs/18 T20). The motor has to supply
  * the Coulomb torque by itself; otherwise the LQR can only buy it with wheel
