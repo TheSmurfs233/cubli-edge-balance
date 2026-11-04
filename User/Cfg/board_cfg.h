@@ -622,6 +622,24 @@ extern "C" {
 #define ATT_RANGE_DEG           60.0f
 
 /* ==========================================================================
+ * 7c. Torque interface (S3)
+ *
+ * The balance stage thinks in mN.m. The only conversion into the hardware is
+ * the q-axis current the current loop already regulates, so iq = t / Kt with
+ * Kt taken from motor_cfg.h (MOTOR_KT_NM_A, 28.91 mN.m/A, derived from KE and
+ * the pole pair count - a motor swap updates it automatically).
+ * ========================================================================== */
+
+/* Command ceiling. 34 mN.m is 1.176 A, just inside FOC_I_MAX_A (1.20 A), so a
+ * legal command never sits in the ADC's saturated range. app_torque_set()
+ * re-checks the current limit at run time in case Kt changes. */
+#define TORQUE_MAX_MNM          34.0f
+
+/* Below this the request is treated as zero: 0.5 mN.m is noise and the balance
+ * loop needs 'release' to be unambiguous. */
+#define TORQUE_MIN_MNM          1.0f
+
+/* ==========================================================================
  * 8. Motor parameters -> moved to motor_cfg.h (S10.0)
  *
  * Everything that changes when the motor changes lives in that one file:

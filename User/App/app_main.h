@@ -211,6 +211,15 @@ typedef struct {
 /* Target in rpm, signed. 0 = speed loop off. */
 uint8_t app_spd_set(float rpm);
 void    app_spd_off(void);
+
+/* ---------------- torque interface (S3) ---------------- */
+/* Hold a wheel torque in mN.m; the q-axis current loop is the actuator.
+ * Returns 0 = OK, 2 = not running, 3 = zero drift still measuring,
+ * 4 = CTRL_FOC required, 5 = above TORQUE_MAX_MNM (or the current limit),
+ * 6 = the speed loop is running and owns iq_ref. */
+uint8_t app_torque_set(float mnm);
+void    app_torque_off(void);
+float   app_torque_get(void);
 uint8_t app_spd_set_pi(float kp, float ki);
 void    app_spd_get_pi(float *kp, float *ki);
 

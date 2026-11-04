@@ -147,6 +147,7 @@ static void print_help(void)
     log_printf(" fault          last fault and per-type counters");
     log_printf(" prot [os|st|siq|uv|ov <v>]  protection thresholds");
     log_printf(" spd <rpm>      speed loop target, spd off releases iq");
+    log_printf(" torque <mN.m>  hold a wheel torque 0..34 mN.m, torque off releases");
     log_printf(" spi <kp> <ki>  speed PI gains, spi shows them");
     log_printf(" sstep <rpm>    measure a speed step at 1 kHz, prints the result");
     log_printf(" sff [<base> <slope>]  friction feedforward, slope is A per 1000 rpm");
@@ -682,6 +683,24 @@ static void cmd_att_stat(const char *sec_arg)
 
 /* Dispatch                                                            */
 /* ------------------------------------------------------------------ */
+static void print_torque(void)
+{
+    const app_foc_info_t *f = app_foc_info();
+    const mid_enc_t *e = mid_enc_info();
+    float cmd = app_torque_get();
+
+    log_printf("---- torque (S3) ----");
+    log_printf(" cmd   = %.2f mN.m -> iq %.3f A (Kt %.4f N.m/A)",
+               (double)cmd, (double)(cmd / (1000.0f * MOTOR_KT_NM_A)),
+               (double)MOTOR_KT_NM_A);
+    log_printf(" ref   = iq %.3f A, id %.3f A", (double)f->iq_ref, (double)f->id_ref);
+    log_printf(" meas  = iq %.3f A, id %.3f A", (double)f->iq, (double)f->id);
+    log_printf(" wheel = %.2f rpm, state %s", (double)e->spd_rpm,
+               app_state_name(app_status()->state));
+    log_printf(" limit = +-%.1f mN.m, release below %.1f mN.m",
+               (double)TORQUE_MAX_MNM, (double)TORQUE_MIN_MNM);
+}
+
 static void cmd_exec(char *line)
 {
     char   *tok[8];
@@ -1013,6 +1032,51 @@ static float   s_pll_zeta = PLL_ZETA;
         } else {
             log_printf("sff base %.3f A, slope %.3f A/krpm",
                        (double)b, (double)(k * 1000.0f));
+        }
+    }
+
+    /* ---------------- torque (S3) ---------------- */
+    else if (strcmp(tok[0], "torque") == 0) {
+        float mnm;
+
+        if ((n == 2u) && (strcmp(tok[1], "off") == 0)) {
+            app_torque_off();
+            log_printf("OK torque released");
+        } else if ((n == 1u) || (n > 2u)) {
+            print_torque();
+        } else if (!parse_num(tok[1], &mnm)) {
+            log_printf("ERR usage=torque <mN.m> | torque off");
+        } else {
+            switch (app_torque_set(mnm)) {
+            case 0u:
+                if (app_torque_get() == 0.0f) {
+                    log_printf("OK torque released (below TORQUE_MIN_MNM)");
+                } else {
+                    log_printf("OK torque %.2f mN.m (iq %.3f A)",
+                               (double)mnm,
+                               (double)(mnm / (1000.0f * MOTOR_KT_NM_A)));
+                }
+                break;
+            case 2u:
+                log_printf("ERR start first");
+                break;
+            case 3u:
+                log_printf("ERR calibrating");
+                break;
+            case 4u:
+                log_printf("ERR mode 2 first (FOC)");
+                break;
+            case 5u:
+                log_printf("ERR torque out of range (+-%.1f mN.m)",
+                           (double)TORQUE_MAX_MNM);
+                break;
+            case 6u:
+                log_printf("ERR speed loop is running, spd off first");
+                break;
+            default:
+                log_printf("ERR torque failed");
+                break;
+            }
         }
     }
 

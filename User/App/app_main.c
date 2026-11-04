@@ -118,6 +118,7 @@ static app_rip_t  s_rip;
 static uint32_t   s_rip_t0;
 static uint8_t    s_rip_on;  /* start of the kick window */
 static float     s_spd_target;    /* commanded, before the ramp  */
+static float     s_torque_mnm;    /* last accepted torque, mN.m   */
 static float     s_spd_ramp_hz;   /* rpm per second              */
 static att_config_t s_att_cfg;    /* S2: body pitch layer        */
 
@@ -798,6 +799,7 @@ uint8_t app_stop(void)
     s_sfoc     = 0u;
     s_ho_state = 0u;
     s_spd_lp   = 0.0f;
+    s_torque_mnm = 0.0f;
 
     alg_vf_stop(&s_vf);                  /* drop the V/f ramp first */
     alg_foc_reset(&s_foc);
@@ -1060,6 +1062,46 @@ void app_foc_get_pi(float *kp, float *ki)
     if (ki != 0) { *ki = s_foc.pi_d.ki; }
 }
 
+/* ---------------- torque interface (S3) ---------------- */
+uint8_t app_torque_set(float mnm)
+{
+    float   iq;
+    uint8_t rc;
+
+    if ((mnm > TORQUE_MAX_MNM) || (mnm < -TORQUE_MAX_MNM)) {
+        return 5u;
+    }
+    if ((mnm < TORQUE_MIN_MNM) && (mnm > -TORQUE_MIN_MNM)) {
+        app_torque_off();
+        return 0u;
+    }
+
+    iq = mnm / (1000.0f * MOTOR_KT_NM_A);
+    if ((iq > FOC_I_MAX_A) || (iq < -FOC_I_MAX_A)) {
+        return 5u;                   /* Kt changed under our feet */
+    }
+
+    rc = app_foc_set(0.0f, iq);
+    if (rc == 0u) {
+        s_torque_mnm = mnm;
+    }
+    return rc;
+}
+
+void app_torque_off(void)
+{
+    s_torque_mnm = 0.0f;
+    if ((s_st.state == APP_ST_RUN) && (s_st.mode == CTRL_FOC) && (s_spd.on == 0u)) {
+        s_foc_info.id_ref = 0.0f;
+        s_foc_info.iq_ref = 0.0f;
+    }
+}
+
+float app_torque_get(void)
+{
+    return s_torque_mnm;
+}
+
 uint8_t app_spd_set(float rpm)
 {
     if (s_st.state != APP_ST_RUN) { return 2u; }
@@ -1084,6 +1126,7 @@ uint8_t app_spd_set(float rpm)
     /* The reference itself is ramped in the 1 kHz task; the kick window
      * starts now so the rotor breaks free before the ramp asks for speed. */
     s_spd_target   = rpm;
+    s_torque_mnm   = 0.0f;      /* the speed loop owns iq_ref now */
     s_spd.on       = 1u;
     s_spd.kick_on  = 1u;
     s_spd_kick_t0  = HAL_GetTick();

@@ -2852,6 +2852,83 @@ static void imu_feed_ahrs(float roll, float pitch, float heading, uint8_t seq)
     imu_poll();
 }
 
+/* ================================================================== */
+/* torque interface (S3)                                              */
+/* ================================================================== */
+static void test_torque(void)
+{
+    section("torque: needs a running FOC bridge");
+    cmd_feed("stop\r\n");
+    tx_clear();
+    cmd_feed("torque 10\r\n");
+    T(tx_contains("ERR start first"));
+    section_end();
+
+    section("torque: refused while the speed loop owns iq");
+    cmd_feed("mode 2\r\n");
+    force_current_ready();
+    cmd_feed("start\r\n");
+    cmd_feed("spd 100\r\n");
+    tx_clear();
+    cmd_feed("torque 10\r\n");
+    T(tx_contains("ERR speed loop is running"));
+    cmd_feed("spd off\r\n");
+    T(fabsf(app_foc_info()->iq_ref) < 1e-6f);
+    section_end();
+
+    section("torque: 10 mN.m becomes 0.346 A");
+    tx_clear();
+    cmd_feed("torque 10\r\n");
+    T(tx_contains("OK torque 10.00 mN.m"));
+    T(fabsf(app_foc_info()->iq_ref - (10.0f / (1000.0f * MOTOR_KT_NM_A))) < 0.002f);
+    T(fabsf(app_torque_get() - 10.0f) < 0.01f);
+    tx_clear();
+    cmd_feed("torque\r\n");
+    T(tx_contains("---- torque (S3) ----"));
+    section_end();
+
+    section("torque: ceiling 34 mN.m, 35 is refused");
+    tx_clear();
+    cmd_feed("torque 34\r\n");
+    T(tx_contains("OK torque 34.00 mN.m"));
+    T(fabsf(app_foc_info()->iq_ref - (34.0f / (1000.0f * MOTOR_KT_NM_A))) < 0.005f);
+    tx_clear();
+    cmd_feed("torque 35\r\n");
+    T(tx_contains("ERR torque out of range"));
+    T(fabsf(app_torque_get() - 34.0f) < 0.01f);   /* unchanged */
+    section_end();
+
+    section("torque: negative drives the other way");
+    tx_clear();
+    cmd_feed("torque -20\r\n");
+    T(tx_contains("OK torque -20.00 mN.m"));
+    T(app_foc_info()->iq_ref < -0.6f);
+    section_end();
+
+    section("torque: off releases, stop clears");
+    tx_clear();
+    cmd_feed("torque off\r\n");
+    T(tx_contains("OK torque released"));
+    T(fabsf(app_foc_info()->iq_ref) < 1e-6f);
+    cmd_feed("torque 10\r\n");
+    cmd_feed("stop\r\n");
+    T(fabsf(app_foc_info()->iq_ref) < 1e-6f);
+    T(fabsf(app_torque_get()) < 1e-6f);
+    section_end();
+
+    section("torque: bad argument keeps the old command");
+    force_current_ready();
+    cmd_feed("mode 2\r\n");
+    cmd_feed("start\r\n");
+    cmd_feed("torque 10\r\n");
+    tx_clear();
+    cmd_feed("torque abc\r\n");
+    T(tx_contains("ERR usage=torque"));
+    T(fabsf(app_torque_get() - 10.0f) < 0.01f);
+    cmd_feed("stop\r\n");
+    section_end();
+}
+
 static void test_imu(void)
 {
     section("imu: RX DMA armed by imu_init()");
@@ -3069,6 +3146,7 @@ int main(void)
     printf("\n[command parser]\n");  test_cmd();
     printf("\n[imu link]\n");        test_imu();
     printf("\n[attitude layer]\n");  test_att();
+    printf("\n[torque interface]\n"); test_torque();
 
     printf("\n============================\n");
     printf("checks: %d   failed: %d\n", g_checks, g_fails);
