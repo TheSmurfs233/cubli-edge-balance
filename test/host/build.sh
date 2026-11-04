@@ -44,6 +44,7 @@ $ROOT/User/Mid/mid_att.c
      $ROOT/User/Alg/alg_pll.c
      $ROOT/User/Alg/alg_obs.c
      $ROOT/User/Alg/alg_if.c
+     $ROOT/User/Alg/alg_bal.c
      $ROOT/User/Bsp/bsp_gpio.c
      $ROOT/User/Bsp/bsp_pwm.c
      $ROOT/User/Bsp/bsp_adc.c
