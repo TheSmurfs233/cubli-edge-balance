@@ -2943,14 +2943,24 @@ static uint32_t s_att_ts_us = 1000u;
 /* Same frame as imu_feed_ahrs(), but stamped with a fresh timestamp: mid_att
  * derives its sample interval from ahrs.timestamp_us and treats a repeated
  * timestamp as "no new information" and holds the filtered value. */
-static void att_feed(float pitch_rad, uint8_t seq)
+/* Feeds a *body* angle, not a raw sensor angle: the frame is written into the
+ * axis that ATT_AXIS selects, with ATT_OFFSET_DEG already removed, so the test
+ * keeps working when the mounting axis or the coarse zero changes. */
+static void att_feed(float theta_deg, uint8_t seq)
 {
     uint8_t  p[FDILINK_MAX_PAYLOAD];
     uint8_t  buf[FDILINK_RAW_MAX];
     uint16_t n;
+    /* The live offset, not the macro: an earlier section calls "att zero",
+     * which moves the zero the rest of the test has to aim at. */
+    float    raw_rad = (att_offset_deg() + theta_deg / ATT_SIGN) / ATT_RAD2DEG;
 
     memset(p, 0, sizeof(p));
-    wr_f32(&p[16], pitch_rad);
+#if (ATT_AXIS == ATT_AXIS_ROLL)
+    wr_f32(&p[12], raw_rad);
+#else
+    wr_f32(&p[16], raw_rad);
+#endif
     wr_f32(&p[24], 1.0f);
     wr_u32(&p[40], s_att_ts_us);
     s_att_ts_us += 5000u;                   /* 200 Hz */
@@ -2970,7 +2980,7 @@ static void test_att(void)
     T(tx_contains("att [zero|stat"));
     section_end();
 
-    section("att: a level frame gives pitch 0 and a valid state");
+    section("att: a level frame gives theta 0 and a valid state");
     att_feed(0.0f, 30u);
     T(att_get()->valid == 1u);
     T(fabsf(att_get()->theta_deg) < 0.01f);
@@ -2978,12 +2988,12 @@ static void test_att(void)
     section_end();
 
     section("att: radians are converted to degrees");
-    att_feed(0.1f, 31u);                       /* 0.1 rad = 5.7296 deg */
+    att_feed(5.7296f, 31u);                    /* body angle in degrees */
     T(fabsf(att_get()->theta_deg - 5.7296f) < 0.01f);
     tx_clear();
     cmd_feed("att\r\n");
     pump_all();
-    T(tx_contains("pitch  = +5.73 deg"));
+    T(tx_contains("= +5.73 deg"));
     T(tx_contains("link   = OK"));
     section_end();
 
@@ -2992,9 +3002,9 @@ static void test_att(void)
     cmd_feed("att zero\r\n");
     pump_all();
     T(tx_contains("OK att zero"));
-    T(fabsf(att_offset_deg() - 5.7296f) < 0.01f);
+    T(fabsf(att_offset_deg() - (ATT_OFFSET_DEG + 5.7296f)) < 0.01f);
     T(fabsf(att_get()->theta_deg) < 0.01f);
-    att_feed(0.2f, 32u);                       /* 0.1 rad more */
+    att_feed(5.7296f, 32u);                    /* 5.7296 deg past the new zero */
     T(fabsf(att_get()->theta_deg - 5.7296f) < 0.01f);
     section_end();
 
@@ -3003,15 +3013,15 @@ static void test_att(void)
     app_att_update();
     T(att_get()->valid == 0u);
     T(att_get()->age_ms > (uint16_t)ATT_TIMEOUT_MS);
-    att_feed(0.2f, 33u);
+    att_feed(3.0f, 33u);
     T(att_get()->valid == 1u);
     section_end();
 
     section("att: out of range is clamped and flagged");
-    att_feed(1.7f, 34u);                       /* 97 deg, well past 60 */
+    att_feed(61.0f, 34u);                      /* 1 deg past the 60 deg limit */
     T(att_get()->valid == 0u);
     T(fabsf(att_get()->theta_deg - ATT_RANGE_DEG) < 0.01f);
-    att_feed(0.1f, 35u);                       /* back inside (zero is 5.73) */
+    att_feed(0.0f, 35u);                       /* back inside the limit */
     T(att_get()->valid == 1u);
     section_end();
 

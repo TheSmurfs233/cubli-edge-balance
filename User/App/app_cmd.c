@@ -606,7 +606,9 @@ static void print_att(void)
 {
     const att_state_t *a = att_get();
 
-    log_printf(" pitch  = %s%.2f deg, rate %s%.2f deg/s",
+    const char *axis = (ATT_AXIS == ATT_AXIS_ROLL) ? "roll " : "pitch";
+
+    log_printf(" %s = %s%.2f deg, rate %s%.2f deg/s", axis,
                (a->theta_deg < 0.0f) ? "-" : "+", (double)fabsf(a->theta_deg),
                (a->theta_dot_dps < 0.0f) ? "-" : "+", (double)fabsf(a->theta_dot_dps));
     log_printf(" wheel  = %.0f rpm, frames = %u", (double)a->wheel_rpm, (unsigned)a->seq);

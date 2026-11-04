@@ -577,25 +577,37 @@ extern "C" {
  * angular rate are the body's. Three things still have to be pinned down:
  * the frame, the zero, and when the value may be trusted.
  *
- * Body frame (frozen in docs/42): +X forward, +Y left, +Z up,
- * theta about +Y, theta > 0 means the cube leans forward.
+ * Body frame (frozen in docs/42, revised 2026-11-04): the cube balances about
+ * the IMU X axis, so theta = roll, rotation about +X. Measured on the bench
+ * (docs/19 section 6.1): looking along +X, a clockwise rotation makes roll
+ * grow. The wheel spin axis has to end up parallel to +X as well, otherwise
+ * the torque and the measured angle do not share an axis (docs/18 T4/T6).
  *
  * mid_fdilink.h stores the 0x41 payload in radians and rad/s; mid_att converts
  * to degrees once so the control law, the console and the docs share one unit.
  * ========================================================================== */
 
-/* Pick the module axis that physically maps onto the body pitch axis.
- * T6 (IMU mounting) is not measured yet, so this stays a switch, not a guess
- * baked into the math: flip it, reflash, check the sign with "att". */
-#define ATT_AXIS                ATT_AXIS_PITCH   /* see ATT_AXIS_ROLL      */
+/* The cube balances on an edge, which tilts the bolted-on module, so the
+ * control axis is the one that carries the edge: measured roll, not pitch
+ * (docs/19 section 6.1). */
+#define ATT_AXIS                ATT_AXIS_ROLL    /* see ATT_AXIS_PITCH     */
 
-/* +1 keeps the module sign, -1 flips it. Also verified on the bench with
- * "att": lean the cube forward and theta must grow. */
+/* +1 keeps the module sign, -1 flips it. The cube may fall either way about
+ * X, so the law itself is symmetric; this only fixes "which way is +".
+ * Still unverified: the hand-lean test cannot tell a real tilt from a hand
+ * wobble. It gets settled in S3 with the wheel reaction test (spin the wheel,
+ * watch which side of theta the body rotates towards) - docs/18 T19. */
 #define ATT_SIGN                1.0f
 
-/* Raw reading (deg) that means "upright". 0 until the mount is levelled or
- * "att zero" is used; nothing here is written to flash on purpose. */
-#define ATT_OFFSET_DEG          0.0f
+/* Raw reading (deg) that means "balanced". COARSE ONLY: 46.0 comes from the
+ * hand-held shelf pose (46.35 deg after removing the 2.45 deg mount bias), and
+ * a hand is not the equilibrium - the true value is a property of the centre
+ * of mass and has to be found on the machine. Two independent trims follow:
+ *   1. the operator calls "att zero" while the cube sits near balance;
+ *   2. the balance law needs a slow bias trim, because a 1 deg error already
+ *      eats a third of the +-2.9 deg capture window (docs/18 T20).
+ * Nothing here is written to flash on purpose. */
+#define ATT_OFFSET_DEG          46.0f
 
 /* First order low pass, 0 = off. Off while measuring: a filter hides exactly
  * the noise and the lag that S2 is supposed to quantify. */
