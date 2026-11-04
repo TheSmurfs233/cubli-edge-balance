@@ -33,7 +33,8 @@ V_LIM = 5.7              # V left after the modulation limit
 I_MAX = 1.20             # A
 TAU_MAX = KT * I_MAX     # 34.7 mN.m
 TAU_FRIC = 2.05e-3       # N.m, measured (S3)
-TAU_MIN = 1.0e-3         # below this the command is rounded to zero
+TAU_MIN = 1.0e-3         # below this the firmware would round the command to zero
+OMEGA_STICK = 0.5        # |omega| below this may be held by static friction [rad/s]
 
 MGH = M_CUBE * G * H_COM
 I_SOLID = (2.0 / 3.0) * M_CUBE * A_CUBE ** 2      # uniform solid cube
@@ -45,7 +46,12 @@ KP, KD, KW = 0.728, 0.0970, 4.0e-5
 
 
 def tau_limit(omega):
-    """Wheel torque still available at a given wheel speed (12 V bus)."""
+    """Wheel torque still available at a given wheel speed (12 V bus).
+
+    The back-EMF depends on the rotor speed in the absolute frame (omega + phi_d).
+    phi_d stays below ~0.2 rad/s while balancing vs omega up to 200 rad/s, so the
+    approximation abs(omega) is good to well under 1%.
+    """
     emf = KT * abs(omega)
     i_cap = (V_LIM - emf) / R_PHASE
     if i_cap > I_MAX:
@@ -67,16 +73,22 @@ def design_lqr(inertia, u0):
     q = np.diag([1 / 0.05 ** 2, 1 / 0.5 ** 2, 1 / 50.0 ** 2])
     r = np.array([[1 / u0 ** 2]])
     k, _, _ = lqr(a, b, q, r)
-    return -k[0]          # u = -K x, our u uses the opposite sign
+    return -k.ravel()     # u = -K x; our u uses the opposite sign, so negate
 
 
 def simulate(kp, kd, kw, inertia, phi0_deg, t_end=10.0, dt=5e-3,
-             noise_deg=0.0, bias_dps=0.25, delay_steps=0, omega0=0.0):
-    """One run at 200 Hz with ZOH, torque saturation, friction, gyro bias."""
+             noise_deg=0.0, bias_dps=0.25, delay_steps=0, omega0=0.0,
+             ki=0.0, z_max=400.0):
+    """One run at 200 Hz with ZOH, torque saturation, friction, gyro bias.
+
+    ki != 0 adds the optional fourth state z = integral(omega) [rad], used by the
+    S6 study in docs/44 4.7.  With ki = 0 this is exactly the S4 controller.
+    """
     i_tot = inertia + J_W
     phi = math.radians(phi0_deg)
     dphi = 0.0
     omega = omega0
+    z = 0.0
     hist = []
     rng = np.random.RandomState(1)
     steps = int(t_end / dt)
@@ -86,21 +98,31 @@ def simulate(kp, kd, kw, inertia, phi0_deg, t_end=10.0, dt=5e-3,
     for k in range(steps):
         phi_m = phi + math.radians(rng.randn() * noise_deg)
         dphi_m = dphi + math.radians(bias_dps + rng.randn() * noise_deg * 10.0)
-        u = kp * phi_m + kd * dphi_m + kw * omega
+        u = kp * phi_m + kd * dphi_m + kw * omega + ki * z
         if abs(u) < TAU_MIN:
             u = 0.0
         u = max(-TAU_MAX, min(TAU_MAX, u))
         delay_buf.append(u)
-        u = delay_buf.pop(0)
+        u = delay_buf.pop(0) if len(delay_buf) > delay_steps else 0.0
         for _ in range(n_sub):
             cap = tau_limit(omega)
             tau = max(-cap, min(cap, u))
-            fr = TAU_FRIC * (1.0 if omega >= 0.0 else -1.0) if tau != 0.0 else 0.0
-            phi_dd = (MGH * math.sin(phi) - tau + fr) / i_tot
-            omega_dd = (tau - fr) / J_W - phi_dd
+            stick = (abs(omega) < OMEGA_STICK) and (abs(tau) <= TAU_FRIC)
+            if stick:
+                # static friction holds the wheel to the body: no relative motion,
+                # bearing carries the motor torque, the body+wheel act as one rigid body
+                fr = tau
+                phi_dd = (MGH * math.sin(phi) - tau + fr) / i_tot
+                omega_dd = 0.0
+            else:
+                fr = TAU_FRIC * (1.0 if omega >= 0.0 else -1.0)
+                phi_dd = (MGH * math.sin(phi) - tau + fr) / i_tot
+                omega_dd = (tau - fr) / J_W - phi_dd
             phi += dphi * h
             dphi += phi_dd * h
-            omega += omega_dd * h
+            omega = 0.0 if stick else omega + omega_dd * h
+        z += omega * dt
+        z = max(-z_max, min(z_max, z))
         hist.append((k * dt, math.degrees(phi), dphi,
                      omega * 60.0 / (2 * math.pi), u * 1e3))
     return np.array(hist)
@@ -139,6 +161,11 @@ def main():
               % (u0 * 1e3, k[0], k[1], k[2]))
     print("  chosen: kp=%.3f  kd=%.4f  kw=%+.2e  (u0 = 2 mN.m row)"
           % (KP, KD, KW))
+    k = design_lqr(NOMINAL_I, 2e-3)
+    same = (abs(k[0] - KP) < 5e-4) and (abs(k[1] - KD) < 5e-4) \
+        and (abs(k[2] - KW) < 5e-7)
+    print("  chosen gains match the LQR solve: %s"
+          % ("yes" if same else "NO -- docs/44 is out of date"))
 
     print("\n1) capture range (release from rest, nominal plant)")
     for phi0 in (1.0, 2.0, 3.0, 4.0, 4.5, 5.0, 6.0):
