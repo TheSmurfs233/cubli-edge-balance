@@ -35,6 +35,7 @@ SRC="$HERE/test_main.c
      $ROOT/User/Mid/mid_trig.c
      $ROOT/User/Mid/mid_enc.c
      $ROOT/User/Mid/mid_fdilink.c
+$ROOT/User/Mid/mid_att.c
      $ROOT/User/Alg/alg_svpwm.c
      $ROOT/User/Alg/alg_vf.c
      $ROOT/User/Alg/alg_pi.c

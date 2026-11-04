@@ -43,7 +43,10 @@
   - 上板：`ver`/`help`/`stat`/`imu`/`fault`/`vbus`/`enc`/`echo`/`prof` 全部可用；IMU `age 6 ms`、CRC 全 0
   - **IMU 姿态已提到 200 Hz**（`imu rate 200 save`，实测 199.78 帧/s，跨断电保持）
   - 电机带载全速段 300~2000 rpm 实测正常（2000 rpm 受电压极限钳在 1970 rpm）
-- 下一阶段：**S2 姿态链路**（`att` 命令输出俯仰角/角速度、静止噪声与漂移达标）
+- 当前阶段：**S2 姿态链路 —— 🟡 进行中**（[42_阶段方案_S2.md](42_阶段方案_S2.md)）
+  - 步骤 2~3 ✅：`User/Mid/mid_att.c/h`（模块姿态 rad→deg、零位、符号、边界与帧龄判定）+ `test/l1/att_test.c` 12 例全过
+  - 步骤 4~5 ⬜：接入 `app_loop()`、`att` 命令、`PROF_ATT`、L2 `test_att()`
+  - 步骤 7 ⬜：上板静止 30 s 漂移/噪声、符号翻转核对（需请示）
 - 门禁（`bash test/verify.sh` 一键跑完，全绿）：
   - 门 1 `test/check_binding.py`：11 项跨文件绑定（DMA 通道、串口实例、波特率、环形模式、纯 ASCII），已通过负向验证
   - 门 2 `test/l1/run.sh`：把 `User/Mid/mid_fdilink.c` 原样在 gcc 下编译，15 项合成帧对拍

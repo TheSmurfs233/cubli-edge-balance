@@ -511,6 +511,11 @@
               <FilePath>../User/Mid/mid_vofa.c</FilePath>
             </File>
             <File>
+              <FileName>mid_att.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Mid/mid_att.c</FilePath>
+            </File>
+            <File>
               <FileName>mid_current.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Mid/mid_current.c</FilePath>
