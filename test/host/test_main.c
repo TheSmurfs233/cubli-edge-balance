@@ -3113,6 +3113,83 @@ static void test_att(void)
 }
 
 /* ================================================================== */
+static void test_bal(void)
+{
+    const app_bal_info_t *b;
+
+    section("bal: help and default state");
+    tx_clear();
+    cmd_feed("help\r\n");
+    pump_all();
+    T(tx_contains("bal [on|off|log"));
+    T(app_bal_info()->on == 0u);
+    section_end();
+
+    section("bal: off by default, the command stays at zero");
+    tx_clear();
+    cmd_feed("bal\r\n");
+    pump_all();
+    T(tx_contains("bal    = off"));
+    T(fabsf(app_bal_info()->tau_mnm) < 0.01f);
+    section_end();
+
+    section("bal: turning it on accepts a valid frame");
+    att_feed(1.0f, 60u);
+    tx_clear();
+    cmd_feed("bal on\r\n");
+    pump_all();
+    T(tx_contains("OK bal on"));
+    T(app_bal_info()->on == 1u);
+    section_end();
+
+    section("bal: the law output is kp * phi");
+    app_att_update();
+    app_bal_update();
+    b = app_bal_info();
+    T(b->valid == 1u);
+    T(fabsf(b->tau_mnm - 12.71f) < 0.5f);
+    T(fabsf(b->tau_kp_mnm - 12.71f) < 0.5f);
+    T(b->saturated == 0u);
+    section_end();
+
+    section("bal: shadow mode never drives the motor");
+    T(app_torque_get() == 0.0f);
+    T(app_foc_info()->iq_ref == 0.0f);
+    section_end();
+
+    section("bal: a large angle saturates at the ceiling");
+    att_feed(30.0f, 61u);
+    app_att_update();
+    app_bal_update();
+    T(app_bal_info()->saturated == 1u);
+    T(fabsf(app_bal_info()->tau_mnm - BAL_MAX_MNM) < 0.01f);
+    section_end();
+
+    section("bal: a stale frame drops the command to zero");
+    fake_tick_add((uint32_t)ATT_TIMEOUT_MS + 10u);
+    app_att_update();
+    app_bal_update();
+    T(app_bal_info()->valid == 0u);
+    T(fabsf(app_bal_info()->tau_mnm) < 0.01f);
+    section_end();
+
+    section("bal: off clears the state");
+    tx_clear();
+    cmd_feed("bal off\r\n");
+    pump_all();
+    T(tx_contains("OK bal off"));
+    T(app_bal_info()->on == 0u);
+    section_end();
+
+    section("bal: log refuses while the law is off");
+    tx_clear();
+    cmd_feed("bal log 1\r\n");
+    pump_all();
+    T(tx_contains("ERR bal log"));
+    section_end();
+}
+
+/* ================================================================== */
 static void banner_reset(void)
 {
     /* app_init() prints a boot banner that is still sitting in the firmware
@@ -3147,6 +3224,7 @@ int main(void)
     printf("\n[imu link]\n");        test_imu();
     printf("\n[attitude layer]\n");  test_att();
     printf("\n[torque interface]\n"); test_torque();
+    printf("\n[balance law]\n");      test_bal();
 
     printf("\n============================\n");
     printf("checks: %d   failed: %d\n", g_checks, g_fails);

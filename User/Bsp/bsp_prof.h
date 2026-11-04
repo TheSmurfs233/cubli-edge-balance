@@ -39,7 +39,8 @@ typedef enum {
     PROF_LOOP,           /* whole app_loop() iteration                      */
     PROF_ENC,            /* mid_enc_update(): SSI read + decode + speed     */
     PROF_IMU,            /* imu_poll(): drain USART1 ring + FDILink parse   */
-  PROF_ATT,            /* app_att_update(): 0x41 frame -> body pitch      */
+    PROF_ATT,            /* app_att_update(): 0x41 frame -> body pitch      */
+    PROF_BAL,            /* app_bal_update(): balance law, shadow only      */
     PROF_SLOT_COUNT
 } prof_slot_t;
 

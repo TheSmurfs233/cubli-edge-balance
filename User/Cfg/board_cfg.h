@@ -640,6 +640,39 @@ extern "C" {
 #define TORQUE_MIN_MNM          1.0f
 
 /* ==========================================================================
+ * 7d. Balance law (S4, shadow mode)
+ *
+ * Designed in sim/s4_design.py and docs/44 4.3. The law works in SI units:
+ *
+ *   tau[N.m] = kp*phi[rad] + kd*phi_dot[rad/s] + kw*omega[rad/s]
+ *
+ * The numbers below are N.m per rad (NOT per degree). Everything is converted
+ * to radians inside app_bal_update() so this table can be pasted straight out
+ * of the design script.
+ * ========================================================================== */
+
+/* Attitude gain. 0.728 N.m/rad = 12.7 mN.m/deg, i.e. 2.2x the gravity
+ * stiffness (mgh = 5.74 mN.m/deg). */
+#define BAL_KP_NM_RAD           0.728f
+
+/* Tilt-rate gain, both poles of the fast pair land at -7.5 rad/s. */
+#define BAL_KD_NM_RPS           0.0970f
+
+/* Wheel-speed gain. Positive: a spinning wheel lets the body fall back a
+ * little and then brakes, which is how the wheel speed is pulled down.
+ * 4.0e-5 N.m/(rad/s) = 0.0042 mN.m/rpm. */
+#define BAL_KW_NM_RPS           4.0e-05f
+
+/* Physical sign of the reaction torque. NOT verified yet (docs/18 T19): it is
+ * decided in the first closed-loop run on the bench, not by hand-held tests.
+ * Keep it an explicit switch so that test flips one number, not a formula. */
+#define BAL_SIGN                1.0f
+
+/* Command ceiling. One mN.m below TORQUE_MAX_MNM so the balance law's own
+ * limit always binds before the torque interface rejects the request. */
+#define BAL_MAX_MNM             33.0f
+
+/* ==========================================================================
  * 8. Motor parameters -> moved to motor_cfg.h (S10.0)
  *
  * Everything that changes when the motor changes lives in that one file:

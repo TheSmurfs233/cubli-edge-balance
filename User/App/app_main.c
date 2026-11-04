@@ -25,6 +25,7 @@
 #include "alg_obs.h"
 #include "alg_if.h"
 #include "alg_spd.h"
+#include "alg_bal.h"
 #include "bsp_adc.h"
 #include "bsp_vbus.h"
 #include "bsp_gpio.h"
@@ -299,6 +300,114 @@ static void att_cfg_load(void)
     s_att_cfg.range_deg  = ATT_RANGE_DEG;
 }
 
+/* ------------------------------------------------------------------ */
+/* Balance law, shadow mode (S4)                                       */
+/*                                                                     */
+/* The law is a pure function in Alg/; this block only packs the three */
+/* states, keeps the last result for the 'bal' command, and never      */
+/* touches the torque interface. Shadow mode is the acceptance tool:   */
+/* if the sign is wrong, the printed command is wrong, but nothing     */
+/* moves.                                                              */
+/* ------------------------------------------------------------------ */
+
+#define BAL_DEG2RAD     0.01745329252f
+#define BAL_RPM2RPS     0.10471975512f
+
+static alg_bal_cfg_t  s_bal_cfg;
+static app_bal_info_t s_bal;
+static uint8_t        s_bal_on;
+
+static void bal_cfg_load(void)
+{
+    s_bal_cfg.kp_nm_rad = BAL_KP_NM_RAD;
+    s_bal_cfg.kd_nm_rps = BAL_KD_NM_RPS;
+    s_bal_cfg.kw_nm_rps = BAL_KW_NM_RPS;
+    s_bal_cfg.sign      = BAL_SIGN;
+    s_bal_cfg.max_nm    = BAL_MAX_MNM / 1000.0f;
+}
+
+void app_bal_update(void)
+{
+    const att_state_t *a;
+    alg_bal_out_t      o;
+    float              phi_rad;
+    float              dphi_rad;
+    float              omega_rad;
+
+    if (s_bal_on == 0u)
+    {
+        return;
+    }
+
+    a = att_get();
+    s_bal.att_valid = a->valid;
+    s_bal.phi_deg   = a->theta_deg;
+    s_bal.dphi_dps  = a->theta_dot_dps;
+    s_bal.omega_rpm = a->wheel_rpm;
+
+    if (a->valid == 0u)
+    {
+        /* No usable frame: report zero rather than a stale command. */
+        s_bal.valid     = 0u;
+        s_bal.saturated = 0u;
+        s_bal.deadband  = 0u;
+        s_bal.tau_mnm   = 0.0f;
+        s_bal.tau_kp_mnm = 0.0f;
+        s_bal.tau_kd_mnm = 0.0f;
+        s_bal.tau_kw_mnm = 0.0f;
+        return;
+    }
+
+    phi_rad   = a->theta_deg * BAL_DEG2RAD;
+    dphi_rad  = a->theta_dot_dps * BAL_DEG2RAD;
+    omega_rad = a->wheel_rpm * BAL_RPM2RPS;
+
+    alg_bal_step(phi_rad, dphi_rad, omega_rad, &o);
+
+    s_bal.valid       = 1u;
+    s_bal.tau_mnm     = o.tau_nm * 1000.0f;
+    s_bal.saturated   = o.saturated;
+    s_bal.deadband    = o.deadband;
+    s_bal.tau_kp_mnm  = s_bal_cfg.sign * s_bal_cfg.kp_nm_rad * phi_rad * 1000.0f;
+    s_bal.tau_kd_mnm  = s_bal_cfg.sign * s_bal_cfg.kd_nm_rps * dphi_rad * 1000.0f;
+    s_bal.tau_kw_mnm  = s_bal_cfg.sign * s_bal_cfg.kw_nm_rps * omega_rad * 1000.0f;
+    s_bal.n++;
+}
+
+uint8_t app_bal_set(uint8_t on)
+{
+    if (on == 0u)
+    {
+        s_bal_on      = 0u;
+        s_bal.on      = 0u;
+        s_bal.valid   = 0u;
+        s_bal.tau_mnm = 0.0f;
+        s_bal.n       = 0u;
+        alg_bal_reset();
+        return 0u;
+    }
+
+    if (alg_bal_ready() == 0u)
+    {
+        return 4u;
+    }
+    if (att_get()->valid == 0u)
+    {
+        return 2u;
+    }
+
+    s_bal_on = 1u;
+    s_bal.on = 1u;
+    s_bal.n  = 0u;
+    alg_bal_reset();
+    return 0u;
+}
+
+const app_bal_info_t *app_bal_info(void)
+{
+    return &s_bal;
+}
+
 /* Init                                                                */
 /* ------------------------------------------------------------------ */
 void app_init(void)
@@ -399,6 +508,8 @@ void app_init(void)
     imu_init();              /* N100 Mini on USART1: arm RX DMA, no TX yet */
     att_cfg_load();          /* S2: frame axis, zero, range, timeout     */
     att_init(&s_att_cfg);
+    bal_cfg_load();          /* S4: gains, mounting sign, ceiling        */
+    alg_bal_init(&s_bal_cfg);
     bsp_pwm_init();          /* counter runs, six outputs stay off (MOE=0) */
     mid_current_init();      /* offsets to nominal, needs calibration */
     bsp_adc_init();          /* arm the injected group (triggered by TIM1_CC4) */
@@ -2668,6 +2779,10 @@ void app_loop(void)
     t = bsp_prof_now();
     app_att_update();        /* newest 0x41 frame -> body pitch (S2) */
     bsp_prof_add(PROF_ATT, t);
+
+    t = bsp_prof_now();
+    app_bal_update();        /* S4 shadow: compute only, never drives */
+    bsp_prof_add(PROF_BAL, t);
 
     task_adc();
     task_enc_slow(now);

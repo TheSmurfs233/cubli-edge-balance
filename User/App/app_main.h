@@ -301,6 +301,33 @@ const app_foc_info_t *app_foc_info(void);
  * no-op. */
 void app_att_update(void);
 
+/* ---------------- balance law, shadow mode (S4) ---------------- */
+/* While "on" the law is evaluated at the attitude rate but the result is
+ * ONLY stored and printed: this layer never calls app_torque_set(). The first
+ * closed-loop run is a separate, explicitly requested step (docs/44 5.6). */
+typedef struct {
+    uint8_t  on;          /* 1 = evaluating                     */
+    uint8_t  valid;       /* 1 = a fresh attitude sample was used */
+    uint8_t  saturated;   /* 1 = the command hit BAL_MAX_MNM      */
+    uint8_t  deadband;    /* 1 = the command was rounded to zero  */
+    uint8_t  att_valid;   /* attitude layer's own flag            */
+    float    phi_deg;     /* tilt fed to the law (body frame)     */
+    float    dphi_dps;    /* tilt rate, deg/s                     */
+    float    omega_rpm;   /* wheel speed, rpm                     */
+    float    tau_mnm;     /* command that WOULD be sent           */
+    float    tau_kp_mnm;  /* term breakdown, mN.m                 */
+    float    tau_kd_mnm;
+    float    tau_kw_mnm;
+    uint32_t n;           /* evaluations since "bal on"           */
+} app_bal_info_t;
+
+/* 0 = OK, 2 = no attitude frame yet, 4 = balance tuning rejected. */
+uint8_t app_bal_set(uint8_t on);
+const app_bal_info_t *app_bal_info(void);
+/* Evaluate once. Called from app_loop(); also from blocking commands so the
+ * sample they print is the newest one. */
+void app_bal_update(void);
+
 const app_phase_info_t *app_phase_info(void);
 void                    app_phase_reset(void);
 

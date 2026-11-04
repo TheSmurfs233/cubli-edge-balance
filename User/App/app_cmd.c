@@ -159,6 +159,7 @@ static void print_help(void)
     log_printf(" prof [reset|on|off]  per-stage timing profile (DWT)");
     log_printf(" imu            IMU link health and the last attitude frame");
     log_printf(" att [zero|stat <s>]  body pitch, rate, zero and noise window");
+    log_printf(" bal [on|off|log <s>] balance law, shadow mode (never drives)");
     log_printf(" imu rate <hz> [save]  set the 0x41 AHRS packet rate (10..200)");
     log_printf(" imu cfg <text> forward one ASCII config command (e.g. imu cfg #fmsg)");
     log_printf(" phase [reset]  where each step lands in the 50us PWM period");
@@ -681,6 +682,71 @@ static void cmd_att_stat(const char *sec_arg)
                (double)first, (double)last);
 }
 
+/* ------------------------------------------------------------------ */
+/* bal: balance law shadow mode (S4)                                   */
+/* ------------------------------------------------------------------ */
+
+static void print_bal(void)
+{
+    const app_bal_info_t *b = app_bal_info();
+
+    log_printf(" bal    = %s (shadow: computes, never drives)",
+               (b->on != 0u) ? "on" : "off");
+    log_printf(" state  = %s, attitude %s, n=%u",
+               (b->valid != 0u) ? "VALID" : "stale",
+               (b->att_valid != 0u) ? "OK" : "INVALID", (unsigned)b->n);
+    log_printf(" input  = phi %s%.2f deg, rate %s%.2f deg/s, wheel %.0f rpm",
+               (b->phi_deg < 0.0f) ? "-" : "+", (double)fabsf(b->phi_deg),
+               (b->dphi_dps < 0.0f) ? "-" : "+", (double)fabsf(b->dphi_dps),
+               (double)b->omega_rpm);
+    log_printf(" tau    = %s%.2f mN.m (kp %s%.2f + kd %s%.2f + kw %s%.2f)",
+               (b->tau_mnm < 0.0f) ? "-" : "+", (double)fabsf(b->tau_mnm),
+               (b->tau_kp_mnm < 0.0f) ? "-" : "+", (double)fabsf(b->tau_kp_mnm),
+               (b->tau_kd_mnm < 0.0f) ? "-" : "+", (double)fabsf(b->tau_kd_mnm),
+               (b->tau_kw_mnm < 0.0f) ? "-" : "+", (double)fabsf(b->tau_kw_mnm));
+    log_printf(" flags  = %s, %s, ceiling %.0f mN.m, sign %s1",
+               (b->saturated != 0u) ? "SATURATED" : "in range",
+               (b->deadband != 0u) ? "deadband" : "active",
+               (double)BAL_MAX_MNM,
+               (BAL_SIGN < 0.0f) ? "-" : "+");
+}
+
+/* Print one row per sample while the user rocks the cube by hand.
+ * 20 ms rows = the 50 Hz the serial link can carry without hiding the timing. */
+static void cmd_bal_log(const char *sec_arg)
+{
+    uint32_t sec;
+    uint32_t t_end;
+    uint32_t t0;
+    const app_bal_info_t *b;
+
+    if ((parse_u32(sec_arg, &sec) == 0u) || (sec == 0u) || (sec > 30u)) {
+        log_printf("ERR usage=bal log <1..30>");
+        return;
+    }
+    if (app_bal_info()->on == 0u) {
+        log_printf("ERR bal log: send \"bal on\" first");
+        return;
+    }
+
+    log_printf(" t,phi_deg,rate_dps,wheel_rpm,tau_mnm,sat,dead");
+    t0    = HAL_GetTick();
+    t_end = t0 + (sec * 1000u);
+
+    while ((int32_t)(t_end - HAL_GetTick()) > 0)
+    {
+        imu_wait(20u);           /* pumps imu_poll() and the TX ring */
+        app_att_update();
+        app_bal_update();
+
+        b = app_bal_info();
+        log_printf(" %.2f,%.2f,%.2f,%.0f,%.2f,%u,%u",
+                   (double)((HAL_GetTick() - t0) / 1000.0f),
+                   (double)b->phi_deg, (double)b->dphi_dps, (double)b->omega_rpm,
+                   (double)b->tau_mnm, (unsigned)b->saturated, (unsigned)b->deadband);
+    }
+}
+
 /* Dispatch                                                            */
 /* ------------------------------------------------------------------ */
 static void print_torque(void)
@@ -762,6 +828,22 @@ static float   s_pll_zeta = PLL_ZETA;
             cmd_att_stat((n >= 3u) ? tok[2] : "5");
         } else {
             print_att();
+        }
+    }
+    /* ---------------- bal ----------------- */
+    else if (strcmp(tok[0], "bal") == 0) {
+        if ((n >= 2u) && (strcmp(tok[1], "on") == 0)) {
+            uint8_t r = app_bal_set(1u);
+            if (r == 0u)      { log_printf("OK bal on (shadow: computes, does not drive)"); }
+            else if (r == 2u) { log_printf("ERR bal: no attitude frame yet"); }
+            else              { log_printf("ERR bal: tuning rejected, check BAL_* in board_cfg.h"); }
+        } else if ((n >= 2u) && (strcmp(tok[1], "off") == 0)) {
+            (void)app_bal_set(0u);
+            log_printf("OK bal off");
+        } else if ((n >= 2u) && (strcmp(tok[1], "log") == 0)) {
+            cmd_bal_log((n >= 3u) ? tok[2] : "3");
+        } else {
+            print_bal();
         }
     }
     /* ---------------- start --------------- */
@@ -1864,7 +1946,7 @@ static float   s_pll_zeta = PLL_ZETA;
         } else {
             static const char *const names[PROF_SLOT_COUNT] = {
                 "isr", "isr_period", "adc_read", "conv",
-                "wave", "cmd", "txpump", "loop", "enc", "imu", "att"
+                "wave", "cmd", "txpump", "loop", "enc", "imu", "att", "bal"
             };
             uint8_t i;
 
