@@ -318,12 +318,18 @@ typedef struct {
     float    tau_kp_mnm;  /* term breakdown, mN.m                 */
     float    tau_kd_mnm;
     float    tau_kw_mnm;
+    float    tau_ff_mnm;  /* friction feed-forward applied        */
+    float    trim_deg;    /* runtime zero trim in use             */
     uint32_t n;           /* evaluations since "bal on"           */
 } app_bal_info_t;
 
 /* 0 = OK, 2 = no attitude frame yet, 4 = balance tuning rejected. */
 uint8_t app_bal_set(uint8_t on);
 const app_bal_info_t *app_bal_info(void);
+/* Runtime zero trim, clamped to +-BAL_TRIM_MAX_DEG, RAM only. Returns the value
+ * actually stored so the caller can print it. */
+float app_bal_trim_set(float deg);
+float app_bal_trim_get(void);
 /* Evaluate once. Called from app_loop(); also from blocking commands so the
  * sample they print is the newest one. */
 void app_bal_update(void);

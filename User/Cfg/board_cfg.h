@@ -672,6 +672,21 @@ extern "C" {
  * limit always binds before the torque interface rejects the request. */
 #define BAL_MAX_MNM             33.0f
 
+/* Friction feed-forward (docs/45 4.8, docs/18 T20). The motor has to supply
+ * the Coulomb torque by itself; otherwise the LQR can only buy it with wheel
+ * speed and the wheel parks at (tau_f - kp*theta0)/kw -- 490 rpm with a perfect
+ * zero and 1200 rpm for a 0.2 deg zero error (measured 2.05 mN.m in S3).
+ * Applied with the sign of the wheel, inside a hysteresis band so noise around
+ * standstill cannot flip it every frame. 0 disables it. */
+#define BAL_FF_MNM              2.05f
+#define BAL_FF_DEADBAND_RPM     30.0f
+
+/* Runtime zero trim, operator adjustable with "bal trim <deg>" (RAM only, so a
+ * reboot restores the value below). Bounded because a large trim is just a
+ * worse zero: the usable range around the balance point is a couple of degrees. */
+#define BAL_TRIM_DEG            0.0f
+#define BAL_TRIM_MAX_DEG        2.0f
+
 /* ==========================================================================
  * 7e. Closed-loop orchestration (S6)
  *

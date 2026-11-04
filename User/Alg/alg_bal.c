@@ -21,6 +21,7 @@
 static alg_bal_cfg_t s_cfg;
 static alg_bal_out_t s_out;
 static uint8_t       s_ready;
+static float         s_ff_sgn;   /* last feed-forward direction, +-1 or 0 */
 
 /* ------------------------------------------------------------------------- */
 /* internal helpers                                                          */
@@ -70,6 +71,8 @@ void alg_bal_init(const alg_bal_cfg_t *cfg)
   s_cfg.kw_nm_rps = 0.0f;
   s_cfg.sign      = 1.0f;
   s_cfg.max_nm    = 0.0f;
+  s_cfg.ff_nm     = 0.0f;
+  s_cfg.ff_deadband_rps = 0.0f;
   s_ready         = 0u;
 
   if (cfg != 0)
@@ -92,18 +95,21 @@ void alg_bal_reset(void)
 {
   s_out.tau_nm     = 0.0f;
   s_out.tau_raw_nm = 0.0f;
+  s_out.tau_ff_nm  = 0.0f;
   s_out.phi_rad    = 0.0f;
   s_out.dphi_rps   = 0.0f;
   s_out.omega_rps  = 0.0f;
   s_out.saturated  = 0u;
   s_out.deadband   = 0u;
   s_out.steps      = 0u;
+  s_ff_sgn         = 0.0f;
 }
 
 void alg_bal_step(float phi_rad, float dphi_rps, float omega_rps,
                   alg_bal_out_t *out)
 {
   float tau;
+  float ff;
   uint8_t deadband = 0u;
   uint8_t saturated = 0u;
 
@@ -113,6 +119,28 @@ void alg_bal_step(float phi_rad, float dphi_rps, float omega_rps,
   tau *= s_cfg.sign;
 
   s_out.tau_raw_nm = tau;
+
+  /* Friction feed-forward. The motor has to supply the bearing/Coulomb torque
+     itself; otherwise the LQR can only make that torque with kw * omega and the
+     wheel parks at (tau_f - kp * theta0) / kw, which is a four digit rpm for a
+     small zero error (docs/45 4.8). The sign follows the wheel with a hysteresis
+     band so noise around zero cannot flip it every cycle. NOT multiplied by
+     cfg.sign: it is a physical torque, not a control decision. */
+  ff = 0.0f;
+  if (s_cfg.ff_nm > 0.0f)
+  {
+    if (omega_rps > s_cfg.ff_deadband_rps)
+    {
+      s_ff_sgn = 1.0f;
+    }
+    else if (omega_rps < -s_cfg.ff_deadband_rps)
+    {
+      s_ff_sgn = -1.0f;
+    }
+    ff = s_ff_sgn * s_cfg.ff_nm;
+    tau += ff;
+  }
+  s_out.tau_ff_nm = ff;
 
   tau = apply_deadband(tau, &deadband);
   if (deadband == 0u)

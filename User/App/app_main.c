@@ -320,6 +320,7 @@ static void att_cfg_load(void)
 static alg_bal_cfg_t  s_bal_cfg;
 static app_bal_info_t s_bal;
 static uint8_t        s_bal_on;
+static float          s_bal_trim_deg;   /* runtime zero trim, RAM only */
 
 static void bal_cfg_load(void)
 {
@@ -331,6 +332,10 @@ static void bal_cfg_load(void)
     s_bal_cfg.kw_nm_rps = BAL_KW_NM_RPS * BAL_SCALE;
     s_bal_cfg.sign      = BAL_SIGN;
     s_bal_cfg.max_nm    = BAL_MAX_MNM / 1000.0f;
+    s_bal_cfg.ff_nm     = BAL_FF_MNM / 1000.0f;
+    s_bal_cfg.ff_deadband_rps = BAL_FF_DEADBAND_RPM * BAL_RPM2RPS;
+
+    s_bal_trim_deg      = BAL_TRIM_DEG;
 
     /* Threshold order is a safety property: ARM must sit inside TRIP, the
      * balance ceiling must stay below the torque interface, and the stale
@@ -378,7 +383,7 @@ void app_bal_update(void)
         return;
     }
 
-    phi_rad   = a->theta_deg * BAL_DEG2RAD;
+    phi_rad   = (a->theta_deg - s_bal_trim_deg) * BAL_DEG2RAD;
     dphi_rad  = a->theta_dot_dps * BAL_DEG2RAD;
     omega_rad = a->wheel_rpm * BAL_RPM2RPS;
 
@@ -388,6 +393,8 @@ void app_bal_update(void)
     s_bal.tau_mnm     = o.tau_nm * 1000.0f;
     s_bal.saturated   = o.saturated;
     s_bal.deadband    = o.deadband;
+    s_bal.tau_ff_mnm  = o.tau_ff_nm * 1000.0f;
+    s_bal.trim_deg    = s_bal_trim_deg;
     s_bal.tau_kp_mnm  = s_bal_cfg.sign * s_bal_cfg.kp_nm_rad * phi_rad * 1000.0f;
     s_bal.tau_kd_mnm  = s_bal_cfg.sign * s_bal_cfg.kd_nm_rps * dphi_rad * 1000.0f;
     s_bal.tau_kw_mnm  = s_bal_cfg.sign * s_bal_cfg.kw_nm_rps * omega_rad * 1000.0f;
@@ -426,6 +433,25 @@ uint8_t app_bal_set(uint8_t on)
 const app_bal_info_t *app_bal_info(void)
 {
     return &s_bal;
+}
+
+float app_bal_trim_set(float deg)
+{
+    if (deg > BAL_TRIM_MAX_DEG)
+    {
+        deg = BAL_TRIM_MAX_DEG;
+    }
+    if (deg < -BAL_TRIM_MAX_DEG)
+    {
+        deg = -BAL_TRIM_MAX_DEG;
+    }
+    s_bal_trim_deg = deg;
+    return s_bal_trim_deg;
+}
+
+float app_bal_trim_get(void)
+{
+    return s_bal_trim_deg;
 }
 
 /* ------------------------------------------------------------------ */

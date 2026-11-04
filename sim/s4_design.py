@@ -78,17 +78,33 @@ def design_lqr(inertia, u0):
 
 def simulate(kp, kd, kw, inertia, phi0_deg, t_end=10.0, dt=5e-3,
              noise_deg=0.0, bias_dps=0.25, delay_steps=0, omega0=0.0,
-             ki=0.0, z_max=400.0):
+             ki=0.0, z_max=400.0, phi_offset_deg=0.0, ki_deadband_rpm=0.0,
+             dither_mnm=0.0, dither_hz=60.0, trim_k=0.0, slew_mnm_step=0.0,
+             trim_gate_deg=2.0, trim_clamp_deg=1.0,
+             bias_k_mnm_per_rps=0.0, bias_clamp_mnm=3.0, bias_gate_deg=2.0,
+             ff_mnm=0.0, ff_deadband_rps=0.5):
     """One run at 200 Hz with ZOH, torque saturation, friction, gyro bias.
 
     ki != 0 adds the optional fourth state z = integral(omega) [rad], used by the
     S6 study in docs/44 4.7.  With ki = 0 this is exactly the S4 controller.
+
+    Extra knobs for the T20 study (docs/46), all default-off:
+      phi_offset_deg  constant zero error seen by the controller (deg)
+      ki_deadband_rpm only integrate omega outside this band (wheel speed, rpm)
+      dither_mnm      peak amplitude of a square dither added to the command
+      dither_hz       dither frequency
+      trim_k          angle-zero adaptation: trim' = trim_k * omega [rad/s]
+      slew_mnm_step   max change of the command per control period [mN.m]
     """
     i_tot = inertia + J_W
     phi = math.radians(phi0_deg)
     dphi = 0.0
     omega = omega0
     z = 0.0
+    trim = 0.0
+    bias = 0.0
+    ff_sgn = 0.0
+    u_prev = 0.0
     hist = []
     rng = np.random.RandomState(1)
     steps = int(t_end / dt)
@@ -96,9 +112,24 @@ def simulate(kp, kd, kw, inertia, phi0_deg, t_end=10.0, dt=5e-3,
     h = dt / n_sub
     delay_buf = [0.0] * (delay_steps + 1)
     for k in range(steps):
-        phi_m = phi + math.radians(rng.randn() * noise_deg)
+        phi_m = phi + math.radians(phi_offset_deg + rng.randn() * noise_deg)
         dphi_m = dphi + math.radians(bias_dps + rng.randn() * noise_deg * 10.0)
-        u = kp * phi_m + kd * dphi_m + kw * omega + ki * z
+        u = kp * (phi_m - trim) + kd * dphi_m + kw * omega + ki * z + bias * 1e-3
+        if ff_mnm > 0.0:
+            # friction feed-forward: the motor must supply the friction torque
+            # itself, so the LQR does not have to buy it with wheel speed.
+            # Sign follows the wheel with a hysteresis band (docs/46).
+            if omega > ff_deadband_rps:
+                ff_sgn = 1.0
+            elif omega < -ff_deadband_rps:
+                ff_sgn = -1.0
+            u += ff_sgn * ff_mnm * 1e-3
+        if dither_mnm > 0.0:
+            u += (dither_mnm * 1e-3) * (1.0 if math.sin(2.0 * math.pi * dither_hz * k * dt) >= 0.0 else -1.0)
+        if slew_mnm_step > 0.0:
+            step = slew_mnm_step * 1e-3
+            u = max(u_prev - step, min(u_prev + step, u))
+        u_prev = u
         if abs(u) < TAU_MIN:
             u = 0.0
         u = max(-TAU_MAX, min(TAU_MAX, u))
@@ -121,10 +152,29 @@ def simulate(kp, kd, kw, inertia, phi0_deg, t_end=10.0, dt=5e-3,
             phi += dphi * h
             dphi += phi_dd * h
             omega = 0.0 if stick else omega + omega_dd * h
-        z += omega * dt
+        rpm = omega * 60.0 / (2.0 * math.pi)
+        if abs(rpm) >= ki_deadband_rpm:
+            # brake wind-up: while the wheel turns forward we must LOWER the
+            # command, so the integral accumulates -omega (see docs/46)
+            z -= omega * dt
+        if trim_k > 0.0 and abs(math.degrees(phi)) < trim_gate_deg:
+            # angle-zero adaptation: raise the trim while the wheel turns
+            # forward so the command drops and the wheel slows down.
+            # Gated on the body angle: with a large tilt the wheel-speed loop
+            # must stay out of the way (it would otherwise wind up to the clamp
+            # during the capture transient, see docs/46).
+            trim += trim_k * omega * dt
+            lim = math.radians(trim_clamp_deg)
+            trim = max(-lim, min(lim, trim))
+        if bias_k_mnm_per_rps > 0.0 and abs(math.degrees(phi)) < bias_gate_deg:
+            # wheel-speed loop -> torque bias, much slower than the balance law
+            # and clamped to roughly the measured friction, so a wind-up cannot
+            # turn into a body push (docs/46)
+            bias += -bias_k_mnm_per_rps * rpm * dt
+            bias = max(-bias_clamp_mnm, min(bias_clamp_mnm, bias))
         z = max(-z_max, min(z_max, z))
         hist.append((k * dt, math.degrees(phi), dphi,
-                     omega * 60.0 / (2 * math.pi), u * 1e3))
+                     rpm, u * 1e3, z, math.degrees(trim), bias))
     return np.array(hist)
 
 

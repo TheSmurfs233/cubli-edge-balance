@@ -1,4 +1,4 @@
-# ---- 本工程临时产物 ----
+﻿# ---- 本工程临时产物 ----
 .tmp_env/
 sim/__pycache__/
 __pycache__/
@@ -54,3 +54,4 @@ Thumbs.db
 desktop.ini
 .DS_Store
 MDK-ARM/*.lst
+sim/.t20_*.npy

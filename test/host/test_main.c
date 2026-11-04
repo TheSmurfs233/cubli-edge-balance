@@ -3175,6 +3175,53 @@ static void test_bal(void)
     T(fabsf(app_bal_info()->tau_mnm) < 0.01f);
     section_end();
 
+    section("bal: the zero trim shifts the angle the law sees");
+    tx_clear();
+    cmd_feed("bal trim 0\r\n");
+    pump_all();
+    att_feed(1.0f, 62u);
+    app_att_update();
+    app_bal_update();
+    T(fabsf(app_bal_info()->tau_mnm - (12.71f * BAL_SCALE)) < 0.5f);
+    tx_clear();
+    cmd_feed("bal trim 0.3\r\n");
+    pump_all();
+    T(tx_contains("OK bal trim 0.30 deg"));
+    att_feed(1.0f, 63u);
+    app_att_update();
+    app_bal_update();
+    /* theta - trim = 0.7 deg -> 12.71 * 0.7 * BAL_SCALE mN.m */
+    T(fabsf(app_bal_info()->tau_mnm - (12.71f * 0.7f * BAL_SCALE)) < 0.5f);
+    T(fabsf(app_bal_info()->trim_deg - 0.3f) < 0.001f);
+    section_end();
+
+    section("bal: the trim is clamped and can be read back");
+    tx_clear();
+    cmd_feed("bal trim 9\r\n");
+    pump_all();
+    T(tx_contains("OK bal trim 2.00 deg"));
+    tx_clear();
+    cmd_feed("bal trim\r\n");
+    pump_all();
+    T(tx_contains("trim   = 2.00 deg"));
+    T(fabsf(app_bal_trim_get() - BAL_TRIM_MAX_DEG) < 0.001f);
+    tx_clear();
+    cmd_feed("bal trim x\r\n");
+    pump_all();
+    T(tx_contains("ERR usage=bal trim"));
+    tx_clear();
+    cmd_feed("bal trim 0\r\n");
+    pump_all();
+    section_end();
+
+    section("bal: the screen shows the friction feed-forward and the trim");
+    tx_clear();
+    cmd_feed("bal\r\n");
+    pump_all();
+    T(tx_contains("ff"));
+    T(tx_contains("zero   = trim"));
+    section_end();
+
     section("bal: off clears the state");
     tx_clear();
     cmd_feed("bal off\r\n");

@@ -35,6 +35,9 @@ typedef struct
   float kw_nm_rps;   /**< wheel speed gain, N.m/(rad/s)           */
   float sign;        /**< +1.0f or -1.0f, physical wheel direction */
   float max_nm;      /**< symmetric torque limit, > 0             */
+  float ff_nm;       /**< friction feed-forward magnitude, N.m; 0 = off */
+  float ff_deadband_rps; /**< |wheel speed| below which the ff sign is
+                              kept from the previous call, rad/s       */
 } alg_bal_cfg_t;
 
 /**
@@ -42,8 +45,9 @@ typedef struct
   */
 typedef struct
 {
-  float tau_nm;      /**< command after sign, deadband and limit  */
-  float tau_raw_nm;  /**< command after sign, before limit        */
+  float tau_nm;      /**< command after sign, ff, deadband, limit */
+  float tau_raw_nm;  /**< law output after sign, before ff/limit  */
+  float tau_ff_nm;   /**< friction feed-forward applied, N.m      */
   float phi_rad;     /**< input echo: body tilt away from upright */
   float dphi_rps;    /**< input echo: body tilt rate              */
   float omega_rps;   /**< input echo: wheel speed relative body   */

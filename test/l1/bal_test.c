@@ -57,6 +57,8 @@ static alg_bal_cfg_t cfg_make(float sign, float max_nm)
   c.kw_nm_rps = KW;
   c.sign      = sign;
   c.max_nm    = max_nm;
+  c.ff_nm     = 0.0f;        /* friction feed-forward off by default */
+  c.ff_deadband_rps = 0.1f;
 
   return c;
 }
@@ -172,6 +174,33 @@ int main(void)
   chk(near_mnm(out.tau_nm, -3.3602f, 0.002f) != 0, "15b golden 0.8 deg -0.12 radps -450 rpm");
   alg_bal_step(-2.20f * DEG2RAD, 0.03f, 120.0f * RPM2RPS, &out);
   chk(near_mnm(out.tau_nm, -24.5405f, 0.002f) != 0, "15c golden -2.2 deg 0.03 radps 120 rpm");
+
+  /* 16. friction feed-forward (docs/18 T20). The motor must pay the Coulomb
+        torque itself, otherwise the LQR can only buy it with wheel speed.
+        The term follows the WHEEL sign, not the tilt, and is not multiplied
+        by cfg.sign (it is a physical torque, not a control decision). */
+  cfg = cfg_make(1.0f, MAX_NM);
+  cfg.ff_nm = 0.00205f;                 /* 2.05 mN.m measured in S3 */
+  cfg.ff_deadband_rps = 0.1f;
+  alg_bal_init(&cfg);
+  alg_bal_step(0.0f, 0.0f, 100.0f * RPM2RPS, &out);
+  chk((near_mnm(out.tau_ff_nm, 2.05f, TOL_MNM) != 0) &&
+      (near_mnm(out.tau_nm, (KW * 100.0f * RPM2RPS * 1000.0f) + 2.05f, 0.02f) != 0),
+      "16a ff is +tau_f when the wheel spins forward");
+  alg_bal_step(0.0f, 0.0f, -100.0f * RPM2RPS, &out);
+  chk((near_mnm(out.tau_ff_nm, -2.05f, TOL_MNM) != 0) &&
+      (near_mnm(out.tau_nm, -(KW * 100.0f * RPM2RPS * 1000.0f) - 2.05f, 0.02f) != 0),
+      "16b ff is -tau_f when the wheel spins backward");
+  alg_bal_step(0.0f, 0.0f, 0.01f * RPM2RPS, &out);   /* inside the band */
+  chk(near_mnm(out.tau_ff_nm, -2.05f, TOL_MNM) != 0,
+      "16c ff keeps its last sign inside the deadband (no chatter)");
+  cfg = cfg_make(-1.0f, MAX_NM);        /* flipped mounting sign */
+  cfg.ff_nm = 0.00205f;
+  cfg.ff_deadband_rps = 0.1f;
+  alg_bal_init(&cfg);
+  alg_bal_step(0.0f, 0.0f, 100.0f * RPM2RPS, &out);
+  chk(near_mnm(out.tau_ff_nm, 2.05f, TOL_MNM) != 0,
+      "16d ff is not flipped by cfg.sign");
 
   printf("checks: %d  failed: %d\n", s_checks, s_failed);
   printf("RESULT: %s\n", (s_failed == 0) ? "PASS" : "FAIL");

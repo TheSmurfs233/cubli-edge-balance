@@ -160,6 +160,7 @@ static void print_help(void)
     log_printf(" imu            IMU link health and the last attitude frame");
     log_printf(" att [zero|stat <s>]  body pitch, rate, zero and noise window");
     log_printf(" bal [on|off|log <s>] balance law, shadow mode (never drives)");
+    log_printf(" bal trim <deg> move the zero so the wheel stops winding up");
     log_printf(" bal run [on|off] closed loop with interlocks -- moves the motor");
     log_printf(" imu rate <hz> [save]  set the 0x41 AHRS packet rate (10..200)");
     log_printf(" imu cfg <text> forward one ASCII config command (e.g. imu cfg #fmsg)");
@@ -700,16 +701,20 @@ static void print_bal(void)
                (b->phi_deg < 0.0f) ? "-" : "+", (double)fabsf(b->phi_deg),
                (b->dphi_dps < 0.0f) ? "-" : "+", (double)fabsf(b->dphi_dps),
                (double)b->omega_rpm);
-    log_printf(" tau    = %s%.2f mN.m (kp %s%.2f + kd %s%.2f + kw %s%.2f)",
+    log_printf(" tau    = %s%.2f mN.m (kp %s%.2f + kd %s%.2f + kw %s%.2f, ff %s%.2f)",
                (b->tau_mnm < 0.0f) ? "-" : "+", (double)fabsf(b->tau_mnm),
                (b->tau_kp_mnm < 0.0f) ? "-" : "+", (double)fabsf(b->tau_kp_mnm),
                (b->tau_kd_mnm < 0.0f) ? "-" : "+", (double)fabsf(b->tau_kd_mnm),
-               (b->tau_kw_mnm < 0.0f) ? "-" : "+", (double)fabsf(b->tau_kw_mnm));
+               (b->tau_kw_mnm < 0.0f) ? "-" : "+", (double)fabsf(b->tau_kw_mnm),
+               (b->tau_ff_mnm < 0.0f) ? "-" : "+", (double)fabsf(b->tau_ff_mnm));
     log_printf(" flags  = %s, %s, ceiling %.0f mN.m, sign %s1",
                (b->saturated != 0u) ? "SATURATED" : "in range",
                (b->deadband != 0u) ? "deadband" : "active",
                (double)BAL_MAX_MNM,
                (BAL_SIGN < 0.0f) ? "-" : "+");
+    log_printf(" zero   = trim %s%.2f deg (max %.1f), friction ff %.2f mN.m",
+               (b->trim_deg < 0.0f) ? "-" : "+", (double)fabsf(b->trim_deg),
+               (double)BAL_TRIM_MAX_DEG, (double)BAL_FF_MNM);
 }
 
 /* Print one row per sample while the user rocks the cube by hand.
@@ -925,6 +930,17 @@ static float   s_pll_zeta = PLL_ZETA;
             log_printf("OK bal off");
         } else if ((n >= 2u) && (strcmp(tok[1], "log") == 0)) {
             cmd_bal_log((n >= 3u) ? tok[2] : "3");
+        } else if ((n >= 2u) && (strcmp(tok[1], "trim") == 0)) {
+            float deg = 0.0f;
+            if ((n >= 3u) && (parse_num(tok[2], &deg) != 0u)) {
+                deg = app_bal_trim_set(deg);
+                log_printf("OK bal trim %.2f deg (angle used = theta - trim)", (double)deg);
+            } else if (n < 3u) {
+                log_printf(" trim   = %.2f deg (max %.1f), usage=bal trim <deg>",
+                           (double)app_bal_trim_get(), (double)BAL_TRIM_MAX_DEG);
+            } else {
+                log_printf("ERR usage=bal trim <deg>");
+            }
         } else {
             print_bal();
         }
