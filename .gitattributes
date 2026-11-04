@@ -27,3 +27,4 @@
 *.pdf  binary
 *.png  binary
 *.jpg  binary
+*.md            eol=lf
