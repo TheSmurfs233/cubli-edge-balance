@@ -728,8 +728,12 @@ extern "C" {
  * 1.2 Hz closed loop, slow enough not to excite the frame. */
 #define BAL_SLEW_MNM_STEP       10.0f
 
-/* Automatic stop. S6a first flights use 3 s; the no-cable runs raise it. */
-#define BAL_MAX_MS              3000u
+/* Automatic stop. A hand-held start needs a long window: the operator has to
+ * let go, and a 3 s window expires while the hand is still on the cube (measured
+ * twice: phi stayed inside 0.02 deg for the whole run, i.e. the cube never left
+ * the hand). The loop still trips on tilt / rate / wheel / stale long before
+ * this, so the window is only an upper bound. */
+#define BAL_MAX_MS              15000u
 
 /* ==========================================================================
  * 8. Motor parameters -> moved to motor_cfg.h (S10.0)
