@@ -166,8 +166,13 @@ extern "C" {
 #define PROT_ENC_ZERO_FRAMES    200u
 #define PROT_GRACE_MS           200u    /* ignore speed/Vbus after start */
 
-#define VBUS_OV_V               13.8f           /* 1.15 x nominal */
-#define VBUS_UV_V               9.0f            /* 0.75 x nominal */
+/* The cube runs from a 4S LiPo pack (14.1 V measured, 16.8 V full charge),
+ * not from the original 12 V bench supply, so the trip points follow the pack
+ * and not the old nominal: OV = 16.8 V + 1.2 V margin, UV = 3.0 V per cell
+ * (12.0 V) to stop before the pack is damaged. AO4606 is rated 30 V and the
+ * divider saturates at 23.1 V, so both limits sit far inside the hardware. */
+#define VBUS_OV_V               18.0f           /* 4S full 16.8 V + 7% margin */
+#define VBUS_UV_V               12.0f           /* 3.0 V per cell */
 #define VBUS_MAX_MEASURABLE_V   (ADC_VREF * VBUS_DIV_RATIO)   /* 23.1V */
 
 /* ==========================================================================
