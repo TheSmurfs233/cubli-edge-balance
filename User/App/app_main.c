@@ -34,6 +34,7 @@
 #include "bsp_ssi.h"
 #include "bsp_sys.h"
 #include "bsp_uart.h"
+#include "mid_att.h"
 #include "mid_current.h"
 #include "mid_enc.h"
 #include "mid_log.h"
@@ -118,6 +119,7 @@ static uint32_t   s_rip_t0;
 static uint8_t    s_rip_on;  /* start of the kick window */
 static float     s_spd_target;    /* commanded, before the ramp  */
 static float     s_spd_ramp_hz;   /* rpm per second              */
+static att_config_t s_att_cfg;    /* S2: body pitch layer        */
 
 /* S7.4 speed step measurement. */
 static app_sstep_info_t s_sstep;
@@ -263,6 +265,39 @@ const char *app_mode_name(uint8_t m)
 }
 
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Attitude layer (S2)                                                 */
+/* ------------------------------------------------------------------ */
+
+void app_att_update(void)
+{
+    fdilink_ahrs_t a;
+    uint32_t       age;
+
+    if (imu_get_ahrs(&a) == 0u)
+    {
+        return;                  /* no 0x41 frame yet: keep the last state */
+    }
+
+    age = imu_frame_age_ms();
+    if (age > 60000u)
+    {
+        age = 60000u;            /* keep the uint16 cast meaningful */
+    }
+
+    att_update(&a, (uint16_t)age, mid_enc_info()->spd_rpm);
+}
+
+static void att_cfg_load(void)
+{
+    s_att_cfg.axis       = (uint8_t)ATT_AXIS;
+    s_att_cfg.sign       = ATT_SIGN;
+    s_att_cfg.offset_deg = ATT_OFFSET_DEG;
+    s_att_cfg.lp_hz      = ATT_LP_HZ;
+    s_att_cfg.timeout_ms = (uint16_t)ATT_TIMEOUT_MS;
+    s_att_cfg.range_deg  = ATT_RANGE_DEG;
+}
+
 /* Init                                                                */
 /* ------------------------------------------------------------------ */
 void app_init(void)
@@ -361,6 +396,8 @@ void app_init(void)
     bsp_gpio_init();
     bsp_uart_init();
     imu_init();              /* N100 Mini on USART1: arm RX DMA, no TX yet */
+    att_cfg_load();          /* S2: frame axis, zero, range, timeout     */
+    att_init(&s_att_cfg);
     bsp_pwm_init();          /* counter runs, six outputs stay off (MOE=0) */
     mid_current_init();      /* offsets to nominal, needs calibration */
     bsp_adc_init();          /* arm the injected group (triggered by TIM1_CC4) */
@@ -411,6 +448,11 @@ void app_init(void)
     log_printf(" imu  = USART1 %u baud, %s",
                (unsigned)IMU_UART_BAUD,
                (imu_stream_ok() != 0u) ? "streaming" : "no frame yet");
+    log_printf(" att  = %s axis, sign %s, zero %.2f deg, range %.0f deg, timeout %u ms",
+               (ATT_AXIS == ATT_AXIS_ROLL) ? "roll" : "pitch",
+               (ATT_SIGN < 0.0f) ? "-1" : "+1",
+               (double)ATT_OFFSET_DEG, (double)ATT_RANGE_DEG,
+               (unsigned)ATT_TIMEOUT_MS);
     log_printf("---------------------------------------------");
     log_printf(" KEY -> LED toggle");
     log_printf(" type 'help' for the command list");
@@ -2579,6 +2621,10 @@ void app_loop(void)
     t = bsp_prof_now();
     imu_poll();              /* drain USART1 ring, feed the FDILink parser */
     bsp_prof_add(PROF_IMU, t);
+
+    t = bsp_prof_now();
+    app_att_update();        /* newest 0x41 frame -> body pitch (S2) */
+    bsp_prof_add(PROF_ATT, t);
 
     task_adc();
     task_enc_slow(now);

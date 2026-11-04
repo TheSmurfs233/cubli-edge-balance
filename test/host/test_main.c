@@ -32,6 +32,7 @@
 #include "bsp_pwm.h"
 #include "bsp_adc.h"
 #include "bsp_prof.h"
+#include "mid_att.h"
 #include "alg_svpwm.h"
 #include "alg_vf.h"
 #include "alg_pi.h"
@@ -2934,6 +2935,96 @@ static void test_imu(void)
     section_end();
 }
 
+/* S2: body pitch layer driven through the same path the firmware uses.
+ * feed() pushes one 0x41 frame and lets imu_poll() decode it, exactly like
+ * the main loop does before app_att_update() runs. */
+static uint32_t s_att_ts_us = 1000u;
+
+/* Same frame as imu_feed_ahrs(), but stamped with a fresh timestamp: mid_att
+ * derives its sample interval from ahrs.timestamp_us and treats a repeated
+ * timestamp as "no new information" and holds the filtered value. */
+static void att_feed(float pitch_rad, uint8_t seq)
+{
+    uint8_t  p[FDILINK_MAX_PAYLOAD];
+    uint8_t  buf[FDILINK_RAW_MAX];
+    uint16_t n;
+
+    memset(p, 0, sizeof(p));
+    wr_f32(&p[16], pitch_rad);
+    wr_f32(&p[24], 1.0f);
+    wr_u32(&p[40], s_att_ts_us);
+    s_att_ts_us += 5000u;                   /* 200 Hz */
+
+    n = imu_build(buf, FDILINK_MSG_AHRS, seq, p, FDILINK_AHRS_LEN);
+    fake_imu_rx_feed(buf, n);
+    imu_poll();
+    app_att_update();
+}
+
+static void test_att(void)
+{
+    section("att: help and command output");
+    tx_clear();
+    cmd_feed("help\r\n");
+    pump_all();
+    T(tx_contains("att [zero|stat"));
+    section_end();
+
+    section("att: a level frame gives pitch 0 and a valid state");
+    att_feed(0.0f, 30u);
+    T(att_get()->valid == 1u);
+    T(fabsf(att_get()->theta_deg) < 0.01f);
+    T(att_get()->seq >= 1u);
+    section_end();
+
+    section("att: radians are converted to degrees");
+    att_feed(0.1f, 31u);                       /* 0.1 rad = 5.7296 deg */
+    T(fabsf(att_get()->theta_deg - 5.7296f) < 0.01f);
+    tx_clear();
+    cmd_feed("att\r\n");
+    pump_all();
+    T(tx_contains("pitch  = +5.73 deg"));
+    T(tx_contains("link   = OK"));
+    section_end();
+
+    section("att: att zero captures the current raw value");
+    tx_clear();
+    cmd_feed("att zero\r\n");
+    pump_all();
+    T(tx_contains("OK att zero"));
+    T(fabsf(att_offset_deg() - 5.7296f) < 0.01f);
+    T(fabsf(att_get()->theta_deg) < 0.01f);
+    att_feed(0.2f, 32u);                       /* 0.1 rad more */
+    T(fabsf(att_get()->theta_deg - 5.7296f) < 0.01f);
+    section_end();
+
+    section("att: stale frame turns the value invalid");
+    fake_tick_add((uint32_t)ATT_TIMEOUT_MS + 10u);
+    app_att_update();
+    T(att_get()->valid == 0u);
+    T(att_get()->age_ms > (uint16_t)ATT_TIMEOUT_MS);
+    att_feed(0.2f, 33u);
+    T(att_get()->valid == 1u);
+    section_end();
+
+    section("att: out of range is clamped and flagged");
+    att_feed(1.7f, 34u);                       /* 97 deg, well past 60 */
+    T(att_get()->valid == 0u);
+    T(fabsf(att_get()->theta_deg - ATT_RANGE_DEG) < 0.01f);
+    att_feed(0.1f, 35u);                       /* back inside (zero is 5.73) */
+    T(att_get()->valid == 1u);
+    section_end();
+
+    section("att: stat window reports spread and drift");
+    tx_clear();
+    cmd_feed("att stat 1\r\n");
+    pump_all();
+    T(tx_contains("att stat 1 s"));
+    T(tx_contains("pp="));
+    T(tx_contains("drift ="));
+    section_end();
+}
+
 /* ================================================================== */
 static void banner_reset(void)
 {
@@ -2967,6 +3058,7 @@ int main(void)
     printf("\n[app state machine]\n"); test_app();
     printf("\n[command parser]\n");  test_cmd();
     printf("\n[imu link]\n");        test_imu();
+    printf("\n[attitude layer]\n");  test_att();
 
     printf("\n============================\n");
     printf("checks: %d   failed: %d\n", g_checks, g_fails);

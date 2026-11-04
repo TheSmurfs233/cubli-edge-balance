@@ -22,6 +22,7 @@
 #include "bsp_pwm.h"
 #include "bsp_ssi.h"
 #include "bsp_uart.h"
+#include "mid_att.h"
 #include "mid_current.h"
 #include "mid_enc.h"
 #include "mid_log.h"
@@ -156,6 +157,7 @@ static void print_help(void)
     log_printf(" cal [erase]    zero-drift calibration (needs start), erase = wipe");
     log_printf(" prof [reset|on|off]  per-stage timing profile (DWT)");
     log_printf(" imu            IMU link health and the last attitude frame");
+    log_printf(" att [zero|stat <s>]  body pitch, rate, zero and noise window");
     log_printf(" imu rate <hz> [save]  set the 0x41 AHRS packet rate (10..200)");
     log_printf(" imu cfg <text> forward one ASCII config command (e.g. imu cfg #fmsg)");
     log_printf(" phase [reset]  where each step lands in the 50us PWM period");
@@ -275,7 +277,9 @@ static void print_imu(void)
                (unsigned)st->seq_gap_imu, (unsigned)st->seq_gap_ahrs);
     if (imu_get_ahrs(&ahrs) != 0u) {
         log_printf(" ahrs  = roll %.2f pitch %.2f heading %.2f deg",
-                   (double)ahrs.roll, (double)ahrs.pitch, (double)ahrs.heading);
+                   (double)fdilink_rad2deg(ahrs.roll),
+                   (double)fdilink_rad2deg(ahrs.pitch),
+                   (double)fdilink_rad2deg(ahrs.heading));
     } else {
         log_printf(" ahrs  = no 0x41 frame yet");
     }
@@ -594,6 +598,84 @@ static void cmd_imu_rate(const char *hz_arg, uint8_t do_save)
 }
 
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* att: body pitch layer (S2)                                          */
+/* ------------------------------------------------------------------ */
+
+static void print_att(void)
+{
+    const att_state_t *a = att_get();
+
+    log_printf(" pitch  = %s%.2f deg, rate %s%.2f deg/s",
+               (a->theta_deg < 0.0f) ? "-" : "+", (double)fabsf(a->theta_deg),
+               (a->theta_dot_dps < 0.0f) ? "-" : "+", (double)fabsf(a->theta_dot_dps));
+    log_printf(" wheel  = %.0f rpm, frames = %u", (double)a->wheel_rpm, (unsigned)a->seq);
+    log_printf(" link   = %s, age %u ms, zero %.2f deg",
+               (a->valid != 0u) ? "OK" : "INVALID", (unsigned)a->age_ms,
+               (double)att_offset_deg());
+    log_printf(" limits = +-%.0f deg, timeout %u ms",
+               (double)ATT_RANGE_DEG, (unsigned)ATT_TIMEOUT_MS);
+}
+
+/* Sample the attitude state for a fixed window and report spread and drift.
+ * Blocking on purpose: on the bench this is the fastest way to answer
+ * "how much does it wander" (A-1/A-6 in docs/42). The IMU ring is pumped
+ * from imu_wait(), so 200 Hz frames keep arriving while we sit here. */
+static void cmd_att_stat(const char *sec_arg)
+{
+    uint32_t sec;
+    uint32_t t_end;
+    uint32_t n = 0u;
+    uint32_t bad = 0u;
+    float    mn;
+    float    mx;
+    float    sum = 0.0f;
+    float    first = 0.0f;
+    float    last = 0.0f;
+    float    v;
+
+    if ((parse_u32(sec_arg, &sec) == 0u) || (sec == 0u) || (sec > 60u)) {
+        log_printf("ERR usage=att stat <1..60>");
+        return;
+    }
+
+    mn = 0.0f;
+    mx = 0.0f;
+    t_end = HAL_GetTick() + (sec * 1000u);
+
+    while ((int32_t)(t_end - HAL_GetTick()) > 0)
+    {
+        imu_wait(5u);            /* keeps imu_poll() + the TX pump running */
+        app_att_update();
+
+        v = att_get()->theta_deg;
+        if (att_get()->valid == 0u) {
+            bad++;
+        }
+        if (n == 0u) {
+            mn    = v;
+            mx    = v;
+            first = v;
+        }
+        if (v < mn) { mn = v; }
+        if (v > mx) { mx = v; }
+        sum += v;
+        last = v;
+        n++;
+    }
+
+    if (n == 0u) {
+        log_printf("att stat: no sample");
+        return;
+    }
+
+    log_printf("att stat %u s: n=%u, invalid=%u", (unsigned)sec, (unsigned)n, (unsigned)bad);
+    log_printf(" min=%.2f max=%.2f pp=%.2f mean=%.2f deg",
+               (double)mn, (double)mx, (double)(mx - mn), (double)(sum / (float)n));
+    log_printf(" drift = %+.2f deg over the window (first %.2f -> last %.2f)",
+               (double)(last - first), (double)first, (double)last);
+}
+
 /* Dispatch                                                            */
 /* ------------------------------------------------------------------ */
 static void cmd_exec(char *line)
@@ -624,7 +706,7 @@ static float   s_pll_zeta = PLL_ZETA;
     else if (strcmp(tok[0], "imu") == 0) {
         if ((n >= 2u) && (strcmp(tok[1], "rate") == 0)) {
             if (n < 3u) {
-                log_printf("ERR usage=imu rate <10..400> [save]");
+                log_printf("ERR usage=imu rate <10..200> [save]");
             } else {
                 cmd_imu_rate(tok[2], (uint8_t)((n >= 4u) && (strcmp(tok[3], "save") == 0)));
             }
@@ -646,6 +728,17 @@ static float   s_pll_zeta = PLL_ZETA;
             }
         } else {
             print_imu();
+        }
+    }
+    /* ---------------- att ----------------- */
+    else if (strcmp(tok[0], "att") == 0) {
+        if ((n >= 2u) && (strcmp(tok[1], "zero") == 0)) {
+            att_zero();
+            log_printf("OK att zero: upright is now %.2f deg raw", (double)att_offset_deg());
+        } else if ((n >= 2u) && (strcmp(tok[1], "stat") == 0)) {
+            cmd_att_stat((n >= 3u) ? tok[2] : "5");
+        } else {
+            print_att();
         }
     }
     /* ---------------- start --------------- */
@@ -1703,7 +1796,7 @@ static float   s_pll_zeta = PLL_ZETA;
         } else {
             static const char *const names[PROF_SLOT_COUNT] = {
                 "isr", "isr_period", "adc_read", "conv",
-                "wave", "cmd", "txpump", "loop", "enc", "imu"
+                "wave", "cmd", "txpump", "loop", "enc", "imu", "att"
             };
             uint8_t i;
 

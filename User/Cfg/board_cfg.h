@@ -571,6 +571,45 @@ extern "C" {
 
 
 /* ==========================================================================
+ * 7b. Attitude layer (S2)
+ *
+ * The cube and the IMU are bolted together, so the sensor's orientation and
+ * angular rate are the body's. Three things still have to be pinned down:
+ * the frame, the zero, and when the value may be trusted.
+ *
+ * Body frame (frozen in docs/42): +X forward, +Y left, +Z up,
+ * theta about +Y, theta > 0 means the cube leans forward.
+ *
+ * mid_fdilink.h stores the 0x41 payload in radians and rad/s; mid_att converts
+ * to degrees once so the control law, the console and the docs share one unit.
+ * ========================================================================== */
+
+/* Pick the module axis that physically maps onto the body pitch axis.
+ * T6 (IMU mounting) is not measured yet, so this stays a switch, not a guess
+ * baked into the math: flip it, reflash, check the sign with "att". */
+#define ATT_AXIS                ATT_AXIS_PITCH   /* see ATT_AXIS_ROLL      */
+
+/* +1 keeps the module sign, -1 flips it. Also verified on the bench with
+ * "att": lean the cube forward and theta must grow. */
+#define ATT_SIGN                1.0f
+
+/* Raw reading (deg) that means "upright". 0 until the mount is levelled or
+ * "att zero" is used; nothing here is written to flash on purpose. */
+#define ATT_OFFSET_DEG          0.0f
+
+/* First order low pass, 0 = off. Off while measuring: a filter hides exactly
+ * the noise and the lag that S2 is supposed to quantify. */
+#define ATT_LP_HZ               0.0f
+
+/* A frame older than this is not usable by a balance law. 100 ms is 20 missed
+ * 200 Hz frames, i.e. far past the point where a balance loop has to trip. */
+#define ATT_TIMEOUT_MS          100u
+
+/* Usable range. Outside it the value is flagged invalid and clamped; the
+ * balance stage adds its own trip at 20-25 deg. */
+#define ATT_RANGE_DEG           60.0f
+
+/* ==========================================================================
  * 8. Motor parameters -> moved to motor_cfg.h (S10.0)
  *
  * Everything that changes when the motor changes lives in that one file:

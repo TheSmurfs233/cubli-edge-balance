@@ -287,6 +287,11 @@ uint8_t app_prot_set(uint8_t which, float value);
 
 const app_foc_info_t *app_foc_info(void);
 
+/* S2: refresh the attitude layer from the newest 0x41 frame. Safe to call
+ * from the main loop and from a blocking command: a repeated frame is a
+ * no-op. */
+void app_att_update(void);
+
 const app_phase_info_t *app_phase_info(void);
 void                    app_phase_reset(void);
 

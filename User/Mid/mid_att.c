@@ -152,15 +152,22 @@ void att_update(const fdilink_ahrs_t *ahrs, uint16_t age_ms, float wheel_rpm)
   s_last_ts_us = ahrs->timestamp_us;
   s_have_ts    = 1u;
 
-  if ((s_ready == 0u) || (dt_us == 0u))
+  /* The caller may run far faster than the module sends frames, so the same
+   * 0x41 frame can be offered several times. A repeated timestamp carries no
+   * new information and must not move the filtered value. */
+  if (s_ready == 0u)
   {
-    s_st.theta_deg = target;      /* first sample (or repeated stamp): snap */
+    s_st.theta_deg = target;      /* first sample: no filter transient */
     s_ready        = 1u;
   }
-  else
+  else if (dt_us != 0u)
   {
     alpha = lp_alpha(s_cfg.lp_hz, dt_us);
     s_st.theta_deg += alpha * (target - s_st.theta_deg);
+  }
+  else
+  {
+    /* repeated frame: keep theta, only refresh age and validity */
   }
 
   s_st.theta_dot_dps = s_cfg.sign * rate_dps;
