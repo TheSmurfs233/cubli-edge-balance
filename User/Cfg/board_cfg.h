@@ -699,7 +699,13 @@ extern "C" {
 /* TRIP thresholds: any one of them ends the run within one attitude frame. */
 #define BAL_TRIP_DEG            12.0f   /* 2.73 deg already saturates       */
 #define BAL_TRIP_DPS            200.0f
-#define BAL_TRIP_RPM            1200.0f /* 700 rpm of torque headroom (L-12)*/
+#define BAL_TRIP_RPM            1700.0f /* L-12: at 1700 rpm only 7 mN.m of
+                                         * torque is left, above that the
+                                         * wheel cannot help any more. 1200 was
+                                         * too tight: a 0.5 deg zero error needs
+                                         * ~990 rpm of steady wheel speed to
+                                         * hold, so 1200 tripped before the
+                                         * loop could show anything. */
 #define BAL_TRIP_STALE_MS       50u     /* 10 frames at 200 Hz              */
 
 /* Slew: commanded torque may move at most this much per 5 ms frame. 10 mN.m
