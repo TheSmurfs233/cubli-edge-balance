@@ -108,6 +108,7 @@ static uint32_t s_prot_ovv_ms;     /* over-voltage debounce            */
 static uint16_t s_prot_enc_cnt;    /* consecutive bad encoder frames   */
 static uint32_t s_prot_bad_seen;   /* last encoder good-frame counter  */
 static uint16_t s_prot_enc_zero_cnt;/* consecutive raw==0 frames        */
+static uint16_t s_prot_enc_crc_cnt; /* consecutive CRC-bad encoder frames */
 
 /* S7.3 speed loop. */
 static alg_spd_t s_spd;
@@ -1153,6 +1154,7 @@ uint8_t app_start(void)
     s_prot_start_ms = HAL_GetTick();
     s_prot_enc_cnt  = 0u;
     s_prot_enc_zero_cnt = 0u;
+    s_prot_enc_crc_cnt  = 0u;
     s_prot_bad_seen = mid_enc_info()->frames;
     s_coast         = 0u;                /* #168: start from the zero vector */
     s_coast_ticks   = 0u;
@@ -1764,6 +1766,25 @@ static void task_foc(uint32_t t_pick)
             }
         } else {
             s_prot_enc_zero_cnt = 0u;
+        }
+
+        /* ---- corrupt-frame guard: frames keep arriving but the CRC says the
+         * sensor is not telling the truth (18#L-16, 2026-11-05: the MT6701
+         * latched a magnetic status after the wheel spun up and drove the
+         * frame tail high, crc BAD on ~90 % of frames while mid_enc kept
+         * re-using the last good angle). Steering the FOC on a frozen angle
+         * turns the commanded iq into a wrong-frame vector and the phase
+         * currents run away into the overcurrent trip, so fault first. ---- */
+        if (e->crc_ok == 0u) {
+            if (s_prot_enc_crc_cnt < 0xFFFFu) {
+                s_prot_enc_crc_cnt++;
+            }
+            if (s_prot_enc_crc_cnt >= (uint16_t)PROT_ENC_BAD_FRAMES) {
+                app_fault_raise((uint8_t)APP_FAULT_ENCODER, (float)s_prot_enc_crc_cnt);
+                return;
+            }
+        } else {
+            s_prot_enc_crc_cnt = 0u;
         }
     }
 

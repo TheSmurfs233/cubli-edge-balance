@@ -4,8 +4,8 @@
   * @brief   L1 offline test for User/Alg/alg_bal.c (S4 acceptance, 15 cases).
   *
   *          Compiles the real firmware source on the PC, no HAL, no board.
-  *          Gains match docs/44 (kp 0.728 N.m/rad, kd 0.0970 N.m/(rad/s),
-  *          kw 4.0e-5 N.m/(rad/s), limit 34.7 mN.m).
+  *          Gains match docs/44 (kp 1.31383 N.m/rad, kd 0.175517 N.m/(rad/s),
+  *          kw 3.819719e-4 N.m/(rad/s), limit 34.7 mN.m).
   *          Run through test/l1/run.sh.
   ******************************************************************************
   */
@@ -15,9 +15,9 @@
 
 #define DEG2RAD    0.01745329252f
 #define RPM2RPS    0.10471975512f   /* 2*pi/60 */
-#define KP         0.728f
-#define KD         0.0970f
-#define KW         4.0e-5f
+#define KP         1.31383f
+#define KD         0.175517f
+#define KW         3.819719e-4f
 #define MAX_NM     0.0347f         /* 34.7 mN.m */
 #define TOL_MNM    0.01f           /* 0.01 mN.m */
 
@@ -85,7 +85,7 @@ int main(void)
   chk((alg_bal_ready() == 1u) && (last->steps == 0u) &&
       (near_mnm(last->tau_nm, 0.0f, TOL_MNM) != 0), "1 init loads gains and clears state");
 
-  /* 2. pure attitude: +1 deg -> kp * rad = 12.71 mN.m */
+  /* 2. pure attitude: +1 deg -> kp * rad = 22.9 mN.m */
   alg_bal_step(1.0f * DEG2RAD, 0.0f, 0.0f, &out);
   chk((near_mnm(out.tau_nm, KP * 1000.0f * DEG2RAD, TOL_MNM) != 0) &&
       (out.saturated == 0u) && (out.deadband == 0u), "2 attitude term is kp * phi");
@@ -125,8 +125,8 @@ int main(void)
       (near_mnm(out.tau_raw_nm, -(KP * 3.0f * DEG2RAD * 1000.0f), TOL_MNM) != 0),
       "8 negative saturation clamps but keeps the raw value");
 
-  /* 9. deadband: 0.05 deg needs 0.64 mN.m < 1.0 -> rounded to zero */
-  alg_bal_step(0.05f * DEG2RAD, 0.0f, 0.0f, &out);
+  /* 9. deadband: 0.02 deg needs 0.46 mN.m < 1.0 -> rounded to zero */
+  alg_bal_step(0.02f * DEG2RAD, 0.0f, 0.0f, &out);
   chk((near_mnm(out.tau_nm, 0.0f, TOL_MNM) != 0) && (out.deadband == 1u),
       "9 sub-millinewton commands are rounded to zero");
 
@@ -135,7 +135,7 @@ int main(void)
   alg_bal_init(&cfg);
   alg_bal_step(0.20f * DEG2RAD, 0.0f, 0.0f, &out);
   chk((out.saturated == 0u) && (out.deadband == 0u) &&
-      (near_mnm(out.tau_nm, 2.54f, 0.01f) != 0), "10 small but useful commands pass through");
+      (near_mnm(out.tau_nm, 4.59f, 0.01f) != 0), "10 small but useful commands pass through");
 
   /* 11. steps counter counts every evaluation */
   alg_bal_reset();
@@ -147,7 +147,7 @@ int main(void)
   /* 12. reset clears the counter but keeps the tuning */
   alg_bal_reset();
   alg_bal_step(1.0f * DEG2RAD, 0.0f, 0.0f, &out);
-  chk((out.steps == 1u) && (near_mnm(out.tau_nm, 12.71f, TOL_MNM) != 0),
+  chk((out.steps == 1u) && (near_mnm(out.tau_nm, 22.93f, TOL_MNM) != 0),
       "12 reset clears state but keeps the gains");
 
   /* 13. a rejected tuning set leaves the law disabled and silent */
@@ -158,14 +158,14 @@ int main(void)
       "13 invalid tuning set is rejected and produces no torque");
 
   /* 14. NULL destination still updates the internal copy (kept below the
-        limit on purpose: 25.4 + 1.9 + 0.1 mN.m) */
+        limit on purpose: 22.9 + 0.2 + 0.8 mN.m) */
   cfg = cfg_make(1.0f, MAX_NM);
   alg_bal_init(&cfg);
-  alg_bal_step(2.0f * DEG2RAD, 0.02f, 20.0f * RPM2RPS, 0);
+  alg_bal_step(1.0f * DEG2RAD, 0.02f, 20.0f * RPM2RPS, 0);
   last = alg_bal_get();
-  chk((near_mnm(last->tau_nm, ((KP * 2.0f * DEG2RAD) + (KD * 0.02f) +
+  chk((near_mnm(last->tau_nm, ((KP * 1.0f * DEG2RAD) + (KD * 0.02f) +
                  (KW * 20.0f * RPM2RPS)) * 1000.0f, TOL_MNM) != 0) &&
-      (absf(last->phi_rad - (2.0f * DEG2RAD)) <= 1.0e-6f) &&
+      (absf(last->phi_rad - (1.0f * DEG2RAD)) <= 1.0e-6f) &&
       (absf(last->omega_rps - (20.0f * RPM2RPS)) <= 1.0e-6f),
       "14 three terms add up and the inputs are echoed");
 
@@ -174,12 +174,12 @@ int main(void)
         between the C law and the model that produced the gains. */
   cfg = cfg_make(1.0f, MAX_NM);
   alg_bal_init(&cfg);
-  alg_bal_step(1.50f * DEG2RAD, 0.05f, 300.0f * RPM2RPS, &out);
-  chk(near_mnm(out.tau_nm, 25.1656f, 0.002f) != 0, "15a golden 1.5 deg 0.05 radps 300 rpm");
-  alg_bal_step(0.80f * DEG2RAD, -0.12f, -450.0f * RPM2RPS, &out);
-  chk(near_mnm(out.tau_nm, -3.3602f, 0.002f) != 0, "15b golden 0.8 deg -0.12 radps -450 rpm");
-  alg_bal_step(-2.20f * DEG2RAD, 0.03f, 120.0f * RPM2RPS, &out);
-  chk(near_mnm(out.tau_nm, -24.5405f, 0.002f) != 0, "15c golden -2.2 deg 0.03 radps 120 rpm");
+  alg_bal_step(0.60f * DEG2RAD, 0.02f, 200.0f * RPM2RPS, &out);
+  chk(near_mnm(out.tau_nm, 25.2687f, 0.002f) != 0, "15a golden 0.6 deg 0.02 radps 200 rpm");
+  alg_bal_step(0.20f * DEG2RAD, -0.05f, -300.0f * RPM2RPS, &out);
+  chk(near_mnm(out.tau_nm, -16.1897f, 0.002f) != 0, "15b golden 0.2 deg -0.05 radps -300 rpm");
+  alg_bal_step(-0.90f * DEG2RAD, 0.10f, 400.0f * RPM2RPS, &out);
+  chk(near_mnm(out.tau_nm, 12.9141f, 0.002f) != 0, "15c golden -0.9 deg 0.10 radps 400 rpm");
 
   /* 16. friction feed-forward (docs/18 T20). The motor must pay the Coulomb
         torque itself, otherwise the LQR can only buy it with wheel speed.

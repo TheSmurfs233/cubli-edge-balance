@@ -42,7 +42,14 @@ I_HOLLOW = (7.0 / 6.0) * M_CUBE * A_CUBE ** 2     # thin-walled shell
 NOMINAL_I = I_HOLLOW     # conservative pick until we measure it
 
 # controller gains (see docs/44): u = kp*phi + kd*phi_d + kw*omega
-KP, KD, KW = 0.728, 0.0970, 4.0e-5
+# 2026-11-05: the wheel-speed weight moved from 50 rpm to the 50 rpm set below
+# after the S6b wind-up runs.  The old set (kp 0.728, kw 4.0e-5) needed only
+# ~1.5 mN.m of constant torque to walk the wheel into the 1700 rpm trip in a few
+# seconds, because omega_ss = mgh*sin(err)/kw.  With this set the same 1.5 mN.m
+# settles near 300 rpm and the capture window is unchanged (3 deg recovers,
+# 4 deg does not), see docs/44 4.3 and docs/45 4.13.
+KP, KD, KW = 1.313830, 0.175517, 3.819719e-04
+SIGMA_OMEGA_RPM = 50.0
 
 
 def tau_limit(omega):
@@ -70,7 +77,10 @@ def design_lqr(inertia, u0):
     b = np.array([[0.0],
                   [-1.0 / i_tot],
                   [1.0 / J_W + 1.0 / i_tot]])
-    q = np.diag([1 / 0.05 ** 2, 1 / 0.5 ** 2, 1 / 50.0 ** 2])
+    # sigma_omega = 50 rpm: the wheel-speed state is what the 1700 rpm trip
+    # watches, so it is weighted far above the old 1/50^2 placeholder.
+    sig_w = SIGMA_OMEGA_RPM * 2.0 * math.pi / 60.0   # rpm -> rad/s
+    q = np.diag([1 / 0.05 ** 2, 1 / 0.5 ** 2, 1 / sig_w ** 2])
     r = np.array([[1 / u0 ** 2]])
     k, _, _ = lqr(a, b, q, r)
     return -k.ravel()     # u = -K x; our u uses the opposite sign, so negate
@@ -84,7 +94,7 @@ def simulate(kp, kd, kw, inertia, phi0_deg, t_end=10.0, dt=5e-3,
              bias_k_mnm_per_rps=0.0, bias_clamp_mnm=3.0, bias_gate_deg=2.0,
              ff_mnm=0.0, ff_deadband_rps=0.5,
              trim_db_rpm=0.0, ext_mnm=0.0, trim_rate_dps=0.0,
-             trim_u_k=0.0, trim_u_tau_s=0.5,
+             trim_u_k=0.0, trim_u_tau_s=0.5, trim_w_k=0.0,
              u_max_mnm=0.0, trip_rpm=0.0):
     """One run at 200 Hz with ZOH, torque saturation, friction, gyro bias.
 
@@ -189,6 +199,15 @@ def simulate(kp, kd, kw, inertia, phi0_deg, t_end=10.0, dt=5e-3,
             # in deg/s, gated on a small body angle, clamped, so it cannot push
             # the body over during a capture.
             trim += math.radians(trim_rate_dps) * (1.0 if omega > 0.0 else -1.0) * dt
+            lim = math.radians(trim_clamp_deg)
+            trim = max(-lim, min(lim, trim))
+        elif trim_w_k > 0.0 and abs(math.degrees(phi)) < trim_gate_deg:
+            # wheel-speed trim, the physically signed version: trim' = -k*omega
+            # (rad/s per rad/s).  Because dtau/dtrim is positive (about
+            # +0.93 mN.m/deg near upright), a positive wheel speed can only be
+            # killed by LOWERING the trim.  trim_k above is the sign-flipped
+            # experiment and is unstable on purpose.
+            trim -= trim_w_k * omega * dt
             lim = math.radians(trim_clamp_deg)
             trim = max(-lim, min(lim, trim))
         elif trim_k > 0.0 and abs(math.degrees(phi)) < trim_gate_deg:

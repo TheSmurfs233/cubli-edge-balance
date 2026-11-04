@@ -3148,9 +3148,9 @@ static void test_bal(void)
     b = app_bal_info();
     T(b->valid == 1u);
     /* The first-flight derating is applied when the tuning is loaded, so the
-     * expected value follows BAL_SCALE instead of the nominal 12.71 mN.m. */
-    T(fabsf(b->tau_mnm - (12.71f * BAL_SCALE)) < 0.5f);
-    T(fabsf(b->tau_kp_mnm - (12.71f * BAL_SCALE)) < 0.5f);
+     * expected value follows BAL_SCALE instead of the nominal 22.93 mN.m. */
+    T(fabsf(b->tau_mnm - (22.93f * BAL_SCALE)) < 0.5f);
+    T(fabsf(b->tau_kp_mnm - (22.93f * BAL_SCALE)) < 0.5f);
     T(b->saturated == 0u);
     section_end();
 
@@ -3182,7 +3182,7 @@ static void test_bal(void)
     att_feed(1.0f, 62u);
     app_att_update();
     app_bal_update();
-    T(fabsf(app_bal_info()->tau_mnm - (12.71f * BAL_SCALE)) < 0.5f);
+    T(fabsf(app_bal_info()->tau_mnm - (22.93f * BAL_SCALE)) < 0.5f);
     tx_clear();
     cmd_feed("bal trim 0.3\r\n");
     pump_all();
@@ -3190,8 +3190,8 @@ static void test_bal(void)
     att_feed(1.0f, 63u);
     app_att_update();
     app_bal_update();
-    /* theta - trim = 0.7 deg -> 12.71 * 0.7 * BAL_SCALE mN.m */
-    T(fabsf(app_bal_info()->tau_mnm - (12.71f * 0.7f * BAL_SCALE)) < 0.5f);
+    /* theta - trim = 0.7 deg -> 22.93 * 0.7 * BAL_SCALE mN.m */
+    T(fabsf(app_bal_info()->tau_mnm - (22.93f * 0.7f * BAL_SCALE)) < 0.5f);
     /* The slow adapter is live too, so allow what one 5 ms frame can move. */
     T(fabsf(app_bal_info()->trim_deg - 0.3f) < 0.01f);
     section_end();

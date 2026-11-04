@@ -164,6 +164,14 @@ extern "C" {
  * so a long run of exactly zero is treated as a dead encoder: 200 frames
  * at 20 kHz is 10 ms, far longer than a real 0-degree reading would last. */
 #define PROT_ENC_ZERO_FRAMES    200u
+/* A corrupt SSI frame is rejected by mid_enc, which keeps the previous angle.
+ * That is fine for one or two frames, but a sensor that keeps answering with
+ * bad CRC (measured 2026-11-05: MT6701 latched a magnetic-field status and
+ * drove the frame tail high, crc BAD on ~90 % of frames) leaves the FOC
+ * steering on a frozen angle: the current vector lands in the wrong frame and
+ * the phase currents run away into the overcurrent trip. Count consecutive
+ * bad samples at 1 kHz and fault well before that can matter. */
+#define PROT_ENC_BAD_FRAMES     20u
 #define PROT_GRACE_MS           200u    /* ignore speed/Vbus after start */
 
 /* The cube runs from a 4S LiPo pack (14.1 V measured, 16.8 V full charge),
@@ -611,8 +619,16 @@ extern "C" {
  *   1. the operator calls "att zero" while the cube sits near balance;
  *   2. the balance law needs a slow bias trim, because a 1 deg error already
  *      eats a third of the +-2.9 deg capture window (docs/18 T20).
+ * 2026-11-05 calibration attempt: the 2492 ms closed loop run held phi inside
+ * 1.6 deg with the command never saturated, yet the wheel climbed 0 -> 1694 rpm
+ * in 2.49 s. J*alpha = 5.12e-5 * 71.2 = 3.64 mN.m, i.e. the law was paying the
+ * friction constant plus 3.64 mN.m of extra torque. mgh*sin(delta) = 3.64 mN.m
+ * gives delta = 0.64 deg, so the real balance pose is about 45.36 deg raw and
+ * the old constant made the loop hold 0.64 deg of forward lean forever.
+ * 45.4 is therefore the measured guess, not a tuned number; one more run either
+ * confirms it (wind-up torque drops) or corrects it again.
  * Nothing here is written to flash on purpose. */
-#define ATT_OFFSET_DEG          46.0f
+#define ATT_OFFSET_DEG          45.4f
 
 /* First order low pass, 0 = off. Off while measuring: a filter hides exactly
  * the noise and the lag that S2 is supposed to quantify. */
@@ -656,17 +672,27 @@ extern "C" {
  * of the design script.
  * ========================================================================== */
 
-/* Attitude gain. 0.728 N.m/rad = 12.7 mN.m/deg, i.e. 2.2x the gravity
- * stiffness (mgh = 5.74 mN.m/deg). */
-#define BAL_KP_NM_RAD           0.728f
+/* 2026-11-05: the wheel-speed weight in the LQR cost was moved from an
+ * arbitrary 1/50^2 (units ignored, i.e. 50 rad/s ~ 477 rpm) to 50 rpm, which is
+ * the quantity the 1700 rpm trip actually cares about. The whole gain set moved
+ * with it: kp 0.728 -> 1.314, kd 0.0970 -> 0.1755, kw 4.0e-5 -> 3.82e-4.
+ * Reason: with the old set omega_ss = mgh*sin(zero error)/kw, so 1.5 mN.m of
+ * constant torque (a USB cable) walked the wheel into the trip in a few
+ * seconds. The new set settles the same disturbance near 300 rpm and keeps the
+ * capture window (4.5 deg recovers, 5 deg does not, sim/s4_design.py). */
 
-/* Tilt-rate gain, both poles of the fast pair land at -7.5 rad/s. */
-#define BAL_KD_NM_RPS           0.0970f
+/* Attitude gain. 1.314 N.m/rad = 22.9 mN.m/deg, i.e. 4x the gravity stiffness
+ * (mgh = 5.74 mN.m/deg), so the body is held stiffly and the zero error is paid
+ * with one fifth of the wheel speed it used to cost. */
+#define BAL_KP_NM_RAD           1.313830f
+
+/* Tilt-rate gain, both poles of the fast pair land near -13 rad/s. */
+#define BAL_KD_NM_RPS           0.175517f
 
 /* Wheel-speed gain. Positive: a spinning wheel lets the body fall back a
  * little and then brakes, which is how the wheel speed is pulled down.
- * 4.0e-5 N.m/(rad/s) = 0.0042 mN.m/rpm. */
-#define BAL_KW_NM_RPS           4.0e-05f
+ * 3.82e-4 N.m/(rad/s) = 0.040 mN.m/rpm. */
+#define BAL_KW_NM_RPS           3.819719e-04f
 
 /* Physical sign of the reaction torque. NOT verified yet (docs/18 T19): it is
  * decided in the first closed-loop run on the bench, not by hand-held tests.
@@ -709,8 +735,18 @@ extern "C" {
  * a trim change while the body is still being caught would lean it over.
  * sim/t20_trim.py, 120 s, 2 mN.m cable pull: k = 0.1 keeps |phi| under 0.62 deg,
  * wheel peak 650 rpm, residual +289 rpm instead of +956 rpm with k = 0; k >= 0.3
- * falls. 0 disables the adaptation and leaves the manual trim in charge. */
-#define BAL_TRIM_ADAPT_K        0.1f
+ * falls. 0 disables the adaptation and leaves the manual trim in charge.
+ *
+ * Disabled for the moment (2026-11-05). The sign of trim' was derived from
+ * sim/t20_trim.py, where the body can tilt; on a cube lying flat the body angle
+ * is frozen, the loop cannot answer, and the adaptation winds to the clamp
+ * within a second (measured: trim -2.00 deg, law +17.9 mN.m with phi = 0). That
+ * proves nothing about the edge case either way, and a wrong sign there would
+ * lean the cube over on the first capture, so the next on-board runs keep the
+ * known-good law (the 6132 ms capture ran without adaptation) and the manual
+ * "bal trim" knob, and the automatic version gets its own step with bal log
+ * evidence. */
+#define BAL_TRIM_ADAPT_K        0.0f
 #define BAL_TRIM_ADAPT_TAU_S    0.5f
 #define BAL_TRIM_GATE_DEG       3.0f
 

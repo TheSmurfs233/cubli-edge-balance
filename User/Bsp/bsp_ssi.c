@@ -41,6 +41,31 @@ static volatile uint32_t s_ovr;   /* SPI RX overruns (a byte was lost) */
 static uint8_t  s_stuck;  /* consecutive ISR periods still busy */
 static uint8_t  s_cfg_err; /* DMA channel in code != the one CubeMX configured */
 
+
+/* Drop whatever is left in the SPI receive path.
+ *
+ * A frame is exactly three bytes and the DMA takes exactly three, so any byte
+ * sitting in RXFIFO/DR when a frame starts means an earlier transfer was
+ * aborted while it was still shifting. Those stray bytes are picked up by the
+ * next frame's DMA and every frame after it is then read two bytes late: the
+ * three bytes are real but rotated (measured 2026-11-05: 0x64 0x0D 0x7C is
+ * 0x7C 0x64 0x0D rotated by two bytes, and the rotate-by-16 angle matched the
+ * last good one). The CRC then rejects ~90 % of frames, and because nothing
+ * realigned the reader it stayed that way until a power cycle re-initialised
+ * the SPI. Flushing here makes every frame start at a byte boundary. */
+static void ssi_flush_rx(void)
+{
+    uint32_t i;
+
+    for (i = 0u; i < 8u; i++) {
+        if ((SPI1->SR & (SPI_SR_RXNE | SPI_SR_OVR)) == 0u) {
+            break;
+        }
+        (void)SPI1->DR;                 /* reading DR clears RXNE */
+        (void)SPI1->SR;                 /* reading DR then SR clears OVR */
+    }
+}
+
 void bsp_ssi_init(void)
 {
     /* CSN idles high. SPI1 and hdma_spi1_rx are both initialised by CubeMX:
@@ -94,6 +119,7 @@ void bsp_ssi_start(void)
     s_stuck = 0u;
 
     SSI_DMA->CCR   &= ~DMA_CCR_EN;
+    ssi_flush_rx();                 /* start every frame on a byte boundary */
     SSI_DMA->CNDTR  = 3u;
     DMA1->IFCR      = SSI_IFCR_CGIF;
     SSI_DMA->CCR   |= DMA_CCR_EN;
@@ -172,6 +198,7 @@ void bsp_ssi_abort(void)
     SPI1->CR2   &= ~SPI_CR2_RXDMAEN;
     SSI_DMA->CCR &= ~DMA_CCR_EN;
     CSN_GPIO_Port->BSRR = CSN_Pin;          /* CSN high */
+    ssi_flush_rx();                         /* leave no half-frame behind */
     s_busy  = 0u;
     s_stuck = 0u;
 }

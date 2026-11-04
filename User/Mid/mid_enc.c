@@ -239,9 +239,15 @@ void mid_enc_update(void)
      * angle (one period old, 0.09 deg at 5 Hz) instead of a wrong one. */
     if (rc == 2u) {
         s_enc.ovr++;
+        bsp_ssi_abort();        /* a lost byte shifts every later frame */
         return;
     }
     if (s_enc.crc_ok == 0u) {
+        /* Do not just skip the frame: a corrupt read usually means the reader
+         * slipped by a byte, and without a resync every frame after it is
+         * misaligned too (18#L-16). Aborting flushes the receive path so the
+         * next frame starts on a byte boundary again. */
+        bsp_ssi_abort();
         return;
     }
 
