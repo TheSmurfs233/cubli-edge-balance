@@ -820,11 +820,11 @@ extern "C" {
  * actually starts to move, i.e. until the operator has let go. This removes the
  * arm-versus-release race - holding the cube used to spin the wheel to ~400 rpm
  * in 265 ms (2026-11-05, trip held) because the law fought the hand. A rolling
- * wheel also passes the DEG test, so the angle test is only a fallback for a
+ * wheel also passes the ANGLE test, so the angle test is only a fallback for a
  * slow release; the rate test is the primary trigger. Thresholds: after release
  * a 0.5 deg offset grows at Omega=10 rad/s, so 2 deg/s is reached in ~45 ms. */
 #define BAL_ENGAGE_DPS          2.0f    /* body rate that means "released"   */
-#define BAL_ENGAGE_DEG          0.6f    /* fallback: tilt that means "falling" */
+#define BAL_ENGAGE_DEG          3.0f    /* fallback, MUST exceed BAL_ARM_DEG */
 
 /* ==========================================================================
  * 8. Motor parameters -> moved to motor_cfg.h (S10.0)

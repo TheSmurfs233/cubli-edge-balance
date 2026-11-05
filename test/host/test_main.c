@@ -3023,7 +3023,7 @@ static uint32_t s_att_ts_us = 1000u;
 /* Feeds a *body* angle, not a raw sensor angle: the frame is written into the
  * axis that ATT_AXIS selects, with ATT_OFFSET_DEG already removed, so the test
  * keeps working when the mounting axis or the coarse zero changes. */
-static void att_feed(float theta_deg, uint8_t seq)
+static void att_feed_rate(float theta_deg, float rate_dps, uint8_t seq)
 {
     uint8_t  p[FDILINK_MAX_PAYLOAD];
     uint8_t  buf[FDILINK_RAW_MAX];
@@ -3035,8 +3035,10 @@ static void att_feed(float theta_deg, uint8_t seq)
     memset(p, 0, sizeof(p));
 #if (ATT_AXIS == ATT_AXIS_ROLL)
     wr_f32(&p[12], raw_rad);
+    wr_f32(&p[0], rate_dps / ATT_RAD2DEG);   /* roll rate, rad/s  */
 #else
     wr_f32(&p[16], raw_rad);
+    wr_f32(&p[4], rate_dps / ATT_RAD2DEG);   /* pitch rate, rad/s */
 #endif
     wr_f32(&p[24], 1.0f);
     wr_u32(&p[40], s_att_ts_us);
@@ -3046,6 +3048,11 @@ static void att_feed(float theta_deg, uint8_t seq)
     fake_imu_rx_feed(buf, n);
     imu_poll();
     app_att_update();
+}
+
+static void att_feed(float theta_deg, uint8_t seq)
+{
+    att_feed_rate(theta_deg, 0.0f, seq);
 }
 
 static void test_att(void)
@@ -3297,7 +3304,7 @@ static void test_s6(void)
     section("s6: one command per attitude frame");
     s6_pump();                              /* same seq: must not re-apply */
     T(app_balance_info()->frames == 0u);
-    att_feed(1.0f, 71u);
+    att_feed_rate(1.0f, 30.0f, 71u);        /* motion = the hand let go */
     s6_pump();
     T(app_balance_info()->frames == 1u);
     T(app_balance_info()->state == BAL_ST_RUN);
