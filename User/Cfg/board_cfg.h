@@ -813,6 +813,7 @@ extern "C" {
  * run died on the wheel interlock, which looks like a tuning bug but is really
  * an operator/harness problem. Trip on it in 150 ms and name it "held". */
 #define BAL_HELD_MNM            12.0f   /* law above this counts as "asking"  */
+#define BAL_HELD_DEG            1.0f    /* and only when clearly off balance */
 #define BAL_HELD_DPS            5.0f    /* body below this counts as "static" */
 #define BAL_HELD_MS             150u    /* 30 frames at 200 Hz               */
 

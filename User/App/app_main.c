@@ -689,7 +689,8 @@ void app_balance_update(void)
      * with a static body means the cube rests on something, and the wheel is the
      * only thing that will move. 28 mN.m for 0.35 s already saturates the wheel
      * window, so trip on it quickly and label it. */
-    if ((fabsf(tau) >= BAL_HELD_MNM) && (fabsf(a->theta_dot_dps) <= BAL_HELD_DPS))
+    if ((fabsf(tau) >= BAL_HELD_MNM) && (fabsf(a->theta_deg) >= BAL_HELD_DEG) &&
+        (fabsf(a->theta_dot_dps) <= BAL_HELD_DPS))
     {
         if (s_held_frames < 0xFFFFu) { s_held_frames++; }
         if (((uint32_t)s_held_frames * 5u) >= (uint32_t)BAL_HELD_MS)

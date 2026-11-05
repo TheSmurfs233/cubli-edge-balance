@@ -3285,6 +3285,16 @@ static void test_s6(void)
     T(app_bal_info()->on == 1u);            /* the law was turned on for us */
     section_end();
 
+    section("s6: a small angle with a big torque is balance, not held");
+    /* 2026-11-05: the held detector fired while the cube sat inside 0.46 deg for
+     * a full second - that is the loop working, not the operator holding it.
+     * The angle gate keeps kw*omega (15 mN.m at 543 rpm) from being read as
+     * "fighting a hand". */
+    att_feed_rate(0.3f, 0.0f, 69u);
+    s6_pump();
+    T(app_balance_info()->state != BAL_ST_TRIP);
+    section_end();
+
     section("s6: armed means waiting, not pushing");
     /* Engage-on-release: while the operator still holds the cube, the law output
      * must not reach the wheel. 403 rpm in 265 ms is what fighting the hand
