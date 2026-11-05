@@ -803,7 +803,7 @@ extern "C" {
  * twice: phi stayed inside 0.02 deg for the whole run, i.e. the cube never left
  * the hand). The loop still trips on tilt / rate / wheel / stale long before
  * this, so the window is only an upper bound. */
-#define BAL_MAX_MS              15000u
+#define BAL_MAX_MS              60000u
 
 /* Held-cube detector. A free cube cannot refuse a torque: if the law keeps
  * asking for a large torque while the body neither tilts nor rotates, the cube

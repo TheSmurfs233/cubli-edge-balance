@@ -68,7 +68,7 @@ def tau_limit(omega):
     return KT * i_cap
 
 
-def design_lqr(inertia, u0):
+def design_lqr(inertia, u0, sig_w=None):
     """LQR with Bryson-style weights; u0 = torque we are willing to spend."""
     i_tot = inertia + J_W
     a = np.array([[0.0, 1.0, 0.0],
@@ -79,7 +79,8 @@ def design_lqr(inertia, u0):
                   [1.0 / J_W + 1.0 / i_tot]])
     # sigma_omega = 50 rpm: the wheel-speed state is what the 1700 rpm trip
     # watches, so it is weighted far above the old 1/50^2 placeholder.
-    sig_w = SIGMA_OMEGA_RPM * 2.0 * math.pi / 60.0   # rpm -> rad/s
+    if sig_w is None:
+        sig_w = SIGMA_OMEGA_RPM * 2.0 * math.pi / 60.0   # rpm -> rad/s
     q = np.diag([1 / 0.05 ** 2, 1 / 0.5 ** 2, 1 / sig_w ** 2])
     r = np.array([[1 / u0 ** 2]])
     k, _, _ = lqr(a, b, q, r)
