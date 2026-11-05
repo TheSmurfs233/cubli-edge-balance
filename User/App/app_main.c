@@ -394,8 +394,13 @@ void app_bal_update(void)
 
     /* The slow zero trim runs once per attitude frame (5 ms), not once per main
      * loop pass: the low-pass that feeds it is a 0.5 s filter and a 20 kHz
-     * call rate would make it depend on how busy the loop is. */
-    if (s_bal_seq_prev != a->seq)
+     * call rate would make it depend on how busy the loop is.
+     *
+     * 2026-11-05: only while the loop is actually balancing. The trim has no
+     * negative feedback when the body is held still (flat on the desk), so an
+     * ungated adaptor wound it to the clamp and then shoved the cube over. */
+    if ((s_bal_seq_prev != a->seq) && (app_balance_info()->engaged != 0u) &&
+        (app_balance_info()->state == BAL_ST_RUN))
     {
         s_bal_seq_prev = a->seq;
         alg_bal_adapt(BAL_FRAME_DT_S);
