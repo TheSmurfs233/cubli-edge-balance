@@ -3278,6 +3278,22 @@ static void test_s6(void)
     T(app_bal_info()->on == 1u);            /* the law was turned on for us */
     section_end();
 
+    section("s6: armed means waiting, not pushing");
+    /* Engage-on-release: while the operator still holds the cube, the law output
+     * must not reach the wheel. 403 rpm in 265 ms is what fighting the hand
+     * costs, and that is most of the trip window. */
+    att_feed(0.5f, 70u);                    /* fresh frame, still no motion */
+    s6_pump();
+    T(app_balance_info()->engaged == 0u);
+    T(app_balance_info()->state == BAL_ST_ARMED);
+    T(app_balance_info()->frames == 0u);
+    T(app_torque_get() == 0.0f);
+    tx_clear();
+    cmd_feed("bal run\r\n");
+    pump_all();
+    T(tx_contains("waiting for release"));
+    section_end();
+
     section("s6: one command per attitude frame");
     s6_pump();                              /* same seq: must not re-apply */
     T(app_balance_info()->frames == 0u);

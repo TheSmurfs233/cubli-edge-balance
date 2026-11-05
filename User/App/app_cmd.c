@@ -764,9 +764,11 @@ static void print_bal_run(void)
     const char *sign;
 
     log_printf("---- bal run (S6) ----");
-    log_printf(" state  = %s, trip %s, drive %u",
+    log_printf(" state  = %s, trip %s, drive %u%s",
                app_balance_state_name(r->state),
-               app_balance_trip_name(r->trip), (unsigned)r->drive_ret);
+               app_balance_trip_name(r->trip), (unsigned)r->drive_ret,
+               ((r->state == (uint8_t)BAL_ST_ARMED) && (r->engaged == 0u))
+                   ? ", waiting for release" : "");
     sign = (r->tau_applied_mnm < 0.0f) ? "-" : "+";
     log_printf(" out    = %s%.2f mN.m applied, law %s%.2f mN.m, peak %s%.2f mN.m",
                sign, (double)fabsf(r->tau_applied_mnm),

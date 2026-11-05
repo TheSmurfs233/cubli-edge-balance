@@ -475,6 +475,7 @@ static uint32_t      s_run_t0;
 static uint32_t      s_last_frames;
 static float         s_tau_cmd;
 static uint16_t      s_held_frames;  /* frames with a big torque but a static body */
+static uint8_t       s_engage_wait;  /* armed, waiting for the operator to let go */
 
 const char *app_balance_state_name(uint8_t st)
 {
@@ -531,6 +532,8 @@ uint8_t app_balance_arm(uint8_t on)
         s_run.state           = (uint8_t)BAL_ST_DISARMED;
         s_run.trip            = (uint8_t)BAL_TRIP_NONE;
         s_tau_cmd             = 0.0f;
+        s_engage_wait         = 0u;
+        s_run.engaged         = 0u;
         s_run.tau_applied_mnm = 0.0f;
         app_torque_off();
         return 0u;
@@ -578,6 +581,8 @@ uint8_t app_balance_arm(uint8_t on)
     s_run.omega_peak_rpm = 0.0f;
     s_tau_cmd            = 0.0f;
     s_held_frames        = 0u;
+    s_engage_wait        = 1u;
+    s_run.engaged        = 0u;
     s_run.tau_applied_mnm = 0.0f;
     s_run_t0             = HAL_GetTick();
     s_last_frames        = imu_ctx()->stat.frames;
@@ -648,6 +653,27 @@ void app_balance_update(void)
     app_bal_update();                  /* recompute with this frame */
     tau = s_bal.tau_mnm;
 
+    /* Engage-on-release. While waiting we command nothing: fighting the hand
+     * would only spin the wheel (measured 403 rpm in 265 ms). The first frame
+     * that shows motion means the operator let go, so start from zero there and
+     * restart the run window - the time spent waiting is not runway. */
+    if (s_engage_wait != 0u)
+    {
+        if ((fabsf(a->theta_dot_dps) >= BAL_ENGAGE_DPS) ||
+            (fabsf(a->theta_deg) >= BAL_ENGAGE_DEG))
+        {
+            s_engage_wait = 0u;
+            s_run.engaged = 1u;
+            s_run_t0      = HAL_GetTick();
+            s_tau_cmd     = 0.0f;
+        }
+        else
+        {
+            s_run.state           = (uint8_t)BAL_ST_ARMED;
+            s_run.tau_applied_mnm = 0.0f;
+            return;
+        }
+    }
     /* Held-cube detector. A free cube cannot refuse a torque: a large command
      * with a static body means the cube rests on something, and the wheel is the
      * only thing that will move. 28 mN.m for 0.35 s already saturates the wheel

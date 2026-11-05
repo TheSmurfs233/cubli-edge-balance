@@ -361,6 +361,7 @@ typedef struct {
     uint8_t  state;        /* bal_run_state_t                          */
     uint8_t  trip;         /* bal_trip_t, valid when state == TRIP     */
     uint8_t  drive_ret;    /* last app_torque_set() return code        */
+    uint8_t  engaged;      /* 0 = armed but waiting for release        */
     float    tau_applied_mnm;
     float    tau_peak_mnm; /* max |command| this run                   */
     float    phi_peak_deg; /* max |theta| this run                     */
