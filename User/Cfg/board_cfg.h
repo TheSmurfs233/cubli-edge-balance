@@ -823,8 +823,16 @@ extern "C" {
  * wheel also passes the ANGLE test, so the angle test is only a fallback for a
  * slow release; the rate test is the primary trigger. Thresholds: after release
  * a 0.5 deg offset grows at Omega=10 rad/s, so 2 deg/s is reached in ~45 ms. */
-#define BAL_ENGAGE_DPS          2.0f    /* body rate that means "released"   */
-#define BAL_ENGAGE_DEG          3.0f    /* fallback, MUST exceed BAL_ARM_DEG */
+/* Release detection. A hand wobbles at a couple of deg/s, so a low rate
+ * threshold fires while the cube is still held (2026-11-05: 2 deg/s fired at
+ * 250 ms with the cube in hand, trip held at 442 ms, wheel 548 rpm). Use a rate
+ * a hand cannot fake and require it to persist: 8 deg/s for 3 frames (15 ms).
+ * A released cube from 0.5 deg reaches 8 deg/s in ~0.13 s at ~1.7 deg of tilt,
+ * which still leaves room inside the 4.5 deg capture window. No angle fallback:
+ * a hand can hold any angle, so an angle test only reintroduces the short
+ * circuit seen in the first version (0.6 deg < ARM 2.5 deg). */
+#define BAL_ENGAGE_DPS          8.0f    /* body rate that means "released"   */
+#define BAL_ENGAGE_FRAMES       3u      /* consecutive frames above it       */
 
 /* ==========================================================================
  * 8. Motor parameters -> moved to motor_cfg.h (S10.0)

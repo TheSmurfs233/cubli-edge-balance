@@ -476,6 +476,7 @@ static uint32_t      s_last_frames;
 static float         s_tau_cmd;
 static uint16_t      s_held_frames;  /* frames with a big torque but a static body */
 static uint8_t       s_engage_wait;  /* armed, waiting for the operator to let go */
+static uint8_t       s_engage_cnt;   /* consecutive frames above the rate gate  */
 
 const char *app_balance_state_name(uint8_t st)
 {
@@ -533,6 +534,7 @@ uint8_t app_balance_arm(uint8_t on)
         s_run.trip            = (uint8_t)BAL_TRIP_NONE;
         s_tau_cmd             = 0.0f;
         s_engage_wait         = 0u;
+        s_engage_cnt          = 0u;
         s_run.engaged         = 0u;
         s_run.tau_applied_mnm = 0.0f;
         app_torque_off();
@@ -582,6 +584,7 @@ uint8_t app_balance_arm(uint8_t on)
     s_tau_cmd            = 0.0f;
     s_held_frames        = 0u;
     s_engage_wait        = 1u;
+    s_engage_cnt         = 0u;
     s_run.engaged        = 0u;
     s_run.tau_applied_mnm = 0.0f;
     s_run_t0             = HAL_GetTick();
@@ -659,8 +662,16 @@ void app_balance_update(void)
      * restart the run window - the time spent waiting is not runway. */
     if (s_engage_wait != 0u)
     {
-        if ((fabsf(a->theta_dot_dps) >= BAL_ENGAGE_DPS) ||
-            (fabsf(a->theta_deg) >= BAL_ENGAGE_DEG))
+        if (fabsf(a->theta_dot_dps) >= BAL_ENGAGE_DPS)
+        {
+            if (s_engage_cnt < 0xFFu) { s_engage_cnt++; }
+        }
+        else
+        {
+            s_engage_cnt = 0u;             /* a wobble never lasts 3 frames */
+        }
+
+        if (s_engage_cnt >= BAL_ENGAGE_FRAMES)
         {
             s_engage_wait = 0u;
             s_run.engaged = 1u;

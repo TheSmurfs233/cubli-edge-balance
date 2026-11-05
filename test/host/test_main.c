@@ -3304,8 +3304,17 @@ static void test_s6(void)
     section("s6: one command per attitude frame");
     s6_pump();                              /* same seq: must not re-apply */
     T(app_balance_info()->frames == 0u);
-    att_feed_rate(1.0f, 30.0f, 71u);        /* motion = the hand let go */
+    /* Release = 8 deg/s sustained for 3 frames. One frame is a wobble. */
+    att_feed_rate(1.0f, 30.0f, 71u);
     s6_pump();
+    T(app_balance_info()->engaged == 0u);
+    T(app_balance_info()->frames == 0u);
+    att_feed_rate(1.0f, 30.0f, 72u);
+    s6_pump();
+    T(app_balance_info()->engaged == 0u);
+    att_feed_rate(1.0f, 30.0f, 73u);        /* third frame: engages and drives */
+    s6_pump();
+    T(app_balance_info()->engaged == 1u);
     T(app_balance_info()->frames == 1u);
     T(app_balance_info()->state == BAL_ST_RUN);
     T(app_torque_get() > 0.0f);             /* the loop really drives now */
@@ -3316,7 +3325,7 @@ static void test_s6(void)
      * 0.4x scale asks for ~30 mN.m against ~5 mN.m already applied. */
     {
         float prev = app_balance_info()->tau_applied_mnm;
-        att_feed(6.0f, 72u);
+        att_feed(6.0f, 74u);
         s6_pump();
         T(fabsf(app_balance_info()->tau_applied_mnm - prev) <= (BAL_SLEW_MNM_STEP + 0.01f));
         T(fabsf(app_balance_info()->tau_applied_mnm) <= (BAL_MAX_MNM + 0.01f));
@@ -3325,7 +3334,7 @@ static void test_s6(void)
     section_end();
 
     section("s6: trip on tilt cuts torque and power");
-    att_feed((BAL_TRIP_DEG + 3.0f), 73u);
+    att_feed((BAL_TRIP_DEG + 3.0f), 75u);
     s6_pump();
     r = app_balance_info();
     T(r->state == BAL_ST_TRIP);
@@ -3430,9 +3439,18 @@ static void test_s6(void)
     {
         uint8_t  i;
         uint8_t  seq = 81u;
+        /* Engage first: 3 frames of real motion. */
+        for (i = 0u; i < 3u; i++)
+        {
+            att_feed_rate(0.3f, 30.0f, seq);
+            seq++;
+            s6_pump();
+        }
+        T(app_balance_info()->engaged == 1u);
+        /* Then a big torque with a static body: the hand is still there. */
         for (i = 0u; i < 40u; i++)
         {
-            att_feed(6.0f, seq);
+            att_feed_rate(6.0f, 0.0f, seq);
             seq++;
             s6_pump();
             if (app_balance_info()->state == BAL_ST_TRIP) { break; }
