@@ -746,7 +746,7 @@ extern "C" {
  * known-good law (the 6132 ms capture ran without adaptation) and the manual
  * "bal trim" knob, and the automatic version gets its own step with bal log
  * evidence. */
-#define BAL_TRIM_ADAPT_K        0.1f
+#define BAL_TRIM_ADAPT_K        0.0f
 #define BAL_TRIM_ADAPT_TAU_S    0.5f
 #define BAL_TRIM_GATE_DEG       3.0f
 
