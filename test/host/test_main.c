@@ -3390,6 +3390,39 @@ static void test_s6(void)
     T(tx_contains("disarmed"));
     section_end();
 
+    section("s6: trip when a big torque does not move the body (held)");
+    /* A free cube cannot refuse a torque. Feeding a constant 6 deg with a zero
+     * rate is what a cube resting on a hand or on the USB cable looks like: the
+     * law saturates, nothing moves, and the wheel would do all the accelerating.
+     * The detector must name it instead of burning the wheel window. */
+    cmd_feed("bal run off\r\n");
+    cmd_feed("mode 2\r\n");
+    cmd_feed("start\r\n");
+    att_feed(0.3f, 80u);
+    s6_pump();
+    tx_clear();
+    cmd_feed("bal run on\r\n");
+    pump_all();
+    T(tx_contains("OK bal run armed"));
+    {
+        uint8_t  i;
+        uint8_t  seq = 81u;
+        for (i = 0u; i < 40u; i++)
+        {
+            att_feed(6.0f, seq);
+            seq++;
+            s6_pump();
+            if (app_balance_info()->state == BAL_ST_TRIP) { break; }
+        }
+        T(i < 40u);                          /* it did trip inside 200 ms */
+    }
+    r = app_balance_info();
+    T(r->state == BAL_ST_TRIP);
+    T(r->trip == (uint8_t)BAL_TRIP_HELD);
+    T(app_torque_get() == 0.0f);
+    section_end();
+
+    cmd_feed("bal run off\r\n");
     cmd_feed("stop\r\n");
 }
 

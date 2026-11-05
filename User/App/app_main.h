@@ -353,7 +353,8 @@ typedef enum {
     BAL_TRIP_STALE,       /* attitude frame too old                      */
     BAL_TRIP_FAULT,       /* any drive fault                             */
     BAL_TRIP_TIMEOUT,     /* BAL_MAX_MS elapsed                          */
-    BAL_TRIP_DRIVE        /* app_torque_set() refused                    */
+    BAL_TRIP_DRIVE,       /* app_torque_set() refused                    */
+    BAL_TRIP_HELD         /* big torque asked, body not moving: held     */
 } bal_trip_t;
 
 typedef struct {

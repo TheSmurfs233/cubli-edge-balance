@@ -109,7 +109,6 @@ static uint16_t s_prot_enc_cnt;    /* consecutive bad encoder frames   */
 static uint32_t s_prot_bad_seen;   /* last encoder good-frame counter  */
 static uint16_t s_prot_enc_zero_cnt;/* consecutive raw==0 frames        */
 static uint16_t s_prot_enc_crc_cnt; /* consecutive CRC-bad encoder frames */
-
 /* S7.3 speed loop. */
 static alg_spd_t s_spd;
 static uint8_t   s_spd_div;
@@ -475,6 +474,7 @@ static app_bal_run_t s_run;
 static uint32_t      s_run_t0;
 static uint32_t      s_last_frames;
 static float         s_tau_cmd;
+static uint16_t      s_held_frames;  /* frames with a big torque but a static body */
 
 const char *app_balance_state_name(uint8_t st)
 {
@@ -500,6 +500,7 @@ const char *app_balance_trip_name(uint8_t trip)
     case BAL_TRIP_FAULT:   return "fault";
     case BAL_TRIP_TIMEOUT: return "timeout";
     case BAL_TRIP_DRIVE:   return "drive";
+    case BAL_TRIP_HELD:    return "held";
     default:               return "?";
     }
 }
@@ -576,6 +577,7 @@ uint8_t app_balance_arm(uint8_t on)
     s_run.phi_peak_deg   = 0.0f;
     s_run.omega_peak_rpm = 0.0f;
     s_tau_cmd            = 0.0f;
+    s_held_frames        = 0u;
     s_run.tau_applied_mnm = 0.0f;
     s_run_t0             = HAL_GetTick();
     s_last_frames        = imu_ctx()->stat.frames;
@@ -645,6 +647,24 @@ void app_balance_update(void)
 
     app_bal_update();                  /* recompute with this frame */
     tau = s_bal.tau_mnm;
+
+    /* Held-cube detector. A free cube cannot refuse a torque: a large command
+     * with a static body means the cube rests on something, and the wheel is the
+     * only thing that will move. 28 mN.m for 0.35 s already saturates the wheel
+     * window, so trip on it quickly and label it. */
+    if ((fabsf(tau) >= BAL_HELD_MNM) && (fabsf(a->theta_dot_dps) <= BAL_HELD_DPS))
+    {
+        if (s_held_frames < 0xFFFFu) { s_held_frames++; }
+        if (((uint32_t)s_held_frames * 5u) >= (uint32_t)BAL_HELD_MS)
+        {
+            bal_trip((uint8_t)BAL_TRIP_HELD);
+            return;
+        }
+    }
+    else
+    {
+        s_held_frames = 0u;
+    }
 
     if (tau > (s_tau_cmd + BAL_SLEW_MNM_STEP)) { tau = s_tau_cmd + BAL_SLEW_MNM_STEP; }
     if (tau < (s_tau_cmd - BAL_SLEW_MNM_STEP)) { tau = s_tau_cmd - BAL_SLEW_MNM_STEP; }

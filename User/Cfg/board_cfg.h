@@ -805,6 +805,17 @@ extern "C" {
  * this, so the window is only an upper bound. */
 #define BAL_MAX_MS              15000u
 
+/* Held-cube detector. A free cube cannot refuse a torque: if the law keeps
+ * asking for a large torque while the body neither tilts nor rotates, the cube
+ * is resting on something (hand, USB cable, a stand) and the only thing that
+ * grows is the wheel. Measured 2026-11-05: law pinned at 28 mN.m for ~0.35 s
+ * while the body rate stayed at 0.13 deg/s -> the wheel reached 1690 rpm and the
+ * run died on the wheel interlock, which looks like a tuning bug but is really
+ * an operator/harness problem. Trip on it in 150 ms and name it "held". */
+#define BAL_HELD_MNM            12.0f   /* law above this counts as "asking"  */
+#define BAL_HELD_DPS            5.0f    /* body below this counts as "static" */
+#define BAL_HELD_MS             150u    /* 30 frames at 200 Hz               */
+
 /* ==========================================================================
  * 8. Motor parameters -> moved to motor_cfg.h (S10.0)
  *
