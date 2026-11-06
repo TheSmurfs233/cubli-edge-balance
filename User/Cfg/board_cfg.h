@@ -625,10 +625,17 @@ extern "C" {
  * friction constant plus 3.64 mN.m of extra torque. mgh*sin(delta) = 3.64 mN.m
  * gives delta = 0.64 deg, so the real balance pose is about 45.36 deg raw and
  * the old constant made the loop hold 0.64 deg of forward lean forever.
- * 45.4 is therefore the measured guess, not a tuned number; one more run either
- * confirms it (wind-up torque drops) or corrects it again.
+ * 45.4 was therefore the measured guess, and 2026-11-06 replaced it with a
+ * measured value. With offset 45.4 the bench iteration
+ *     trim_new = trim - omega_rpm / (kp/kw in rpm per deg)      (573 rpm per deg)
+ * drove the wheel from -427 to +152 to +73 to -46 rpm and settled around
+ * trim = 0.87 deg, i.e. theta = 0 at raw 45.4 + 0.87 = 46.27 deg. That agrees
+ * with the independent hand-held 46.35 deg and with the equilibrium fit 46.64 deg
+ * within their own scatter, so the constant is now that measured 46.27.
+ * Consequence: with the wheel at rest the balance law needs no trim at all, and
+ * a reboot no longer re-introduces a 0.9 deg bias that winds the wheel up.
  * Nothing here is written to flash on purpose. */
-#define ATT_OFFSET_DEG          45.4f
+#define ATT_OFFSET_DEG          46.27f
 
 /* First order low pass, 0 = off. Off while measuring: a filter hides exactly
  * the noise and the lag that S2 is supposed to quantify. */

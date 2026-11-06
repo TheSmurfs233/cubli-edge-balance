@@ -333,6 +333,11 @@ float app_bal_trim_get(void);
 void  app_bal_trim_learn(float deg);
 void  app_bal_auto_set(uint8_t on);
 uint8_t app_bal_auto_get(void);
+/* One fixed-point step that centres the body so the wheel can stop:
+ *     trim -= omega_rpm / (kp/kw in rpm per degree)
+ * Returns 0 OK, 2 not running, 3 no attitude, 4 bad gains, 5 wheel reading out
+ * of the trusted band (|omega| > 1200 rpm). Manual override: closes the walk. */
+uint8_t app_bal_snap(void);
 /* Evaluate once. Called from app_loop(); also from blocking commands so the
  * sample they print is the newest one. */
 void app_bal_update(void);

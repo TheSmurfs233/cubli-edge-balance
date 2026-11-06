@@ -3130,6 +3130,9 @@ static void test_bal(void)
     pump_all();
     T(tx_contains("bal [on|off|log"));
     T(app_bal_info()->on == 0u);
+    /* snap refuses outside a running loop: the reference must not move
+     * while the drive is idle, or the next start inherits a lie. */
+    T(app_bal_snap() == 2u);
     section_end();
 
     section("bal: off by default, the command stays at zero");

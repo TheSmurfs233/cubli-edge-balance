@@ -961,6 +961,23 @@ static float   s_pll_zeta = PLL_ZETA;
             } else {
                 log_printf("ERR usage=bal auto <on|off>");
             }
+        } else if ((n >= 2u) && (strcmp(tok[1], "snap") == 0)) {
+            uint8_t rc = app_bal_snap();
+
+            if (rc == 0u) {
+                log_printf("OK bal snap: trim %.2f deg, wheel %+.0f rpm",
+                           (double)app_bal_trim_get(),
+                           (double)app_bal_info()->omega_rpm);
+            } else if (rc == 2u) {
+                log_printf("ERR bal snap: no running loop, use the button or \"bal run on\"");
+            } else if (rc == 3u) {
+                log_printf("ERR bal snap: no valid attitude frame");
+            } else if (rc == 5u) {
+                log_printf("ERR bal snap: wheel %+.0f rpm is outside the trusted +-1200 band",
+                           (double)app_bal_info()->omega_rpm);
+            } else {
+                log_printf("ERR bal snap (rc %u)", (unsigned)rc);
+            }
         } else if ((n >= 2u) && (strcmp(tok[1], "trim") == 0)) {
             float deg = 0.0f;
             if ((n >= 3u) && (parse_num(tok[2], &deg) != 0u)) {

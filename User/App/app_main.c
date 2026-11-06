@@ -483,6 +483,48 @@ uint8_t app_bal_auto_get(void)
     return s_bal_auto;
 }
 
+uint8_t app_bal_snap(void)
+{
+    /* One fixed-point step towards "wheel at rest". At steady state the law
+     * settles on
+     *     omega_ss = (kp / kw) * (trim - phi_ss)
+     * so the trim that centres the body on the true balance point is
+     *     trim_new = trim - omega / (kp/kw in rpm per degree)
+     * With the scaled gains that divisor is 573 rpm/deg, and the bench measured
+     * 610, so one step lands within ~7 percent and two or three steps are enough.
+     * Refused outside a running loop: moving the reference with the drive off
+     * would only arm the next start with a lie. */
+    float kp, kw, rpm_per_deg, trim, w, next;
+    const app_bal_run_t *r = app_balance_info();
+
+    if ((r == 0) || (r->state != BAL_ST_RUN) || (r->engaged == 0u))
+    {
+        return 2u;
+    }
+    if ((att_get() == 0) || (att_get()->valid == 0u))
+    {
+        return 3u;
+    }
+    kp = s_bal_cfg.kp_nm_rad;
+    kw = s_bal_cfg.kw_nm_rps;
+    if ((kp <= 0.0f) || (kw <= 0.0f))
+    {
+        return 4u;
+    }
+    w = s_bal.omega_rpm;
+    if (fabsf(w) > 1200.0f)
+    {
+        /* Above this the reading is more likely wrong than the machine is fast;
+         * a step computed from it could throw the body. */
+        return 5u;
+    }
+    rpm_per_deg = (kp / kw) / 6.0f;   /* (kp/kw) * (pi/180) * (60/2pi) */
+    trim = alg_bal_trim_deg();
+    next = trim - (w / rpm_per_deg);
+    (void)app_bal_trim_set(next);
+    return 0u;
+}
+
 float app_bal_trim_get(void)
 {
     return alg_bal_trim_deg();
