@@ -199,12 +199,10 @@ void bsp_crash_clear(void)
     }
 }
 
-void bsp_crash_report(void)
+/* Print the stored block. Does not touch the backup registers, so it can be
+ * called any number of times (banner at boot and the 'crash' command). */
+static void crash_print_block(void)
 {
-    /* Reset cause has to be read and cleared once, or it stays latched in
-     * the flags forever and every later boot looks the same. */
-    uint32_t csr = RCC->CSR;
-
     if (bsp_crash_valid() != 0u)
     {
         log_printf("crash = kind %u pc %x lr %x psr %x",
@@ -250,8 +248,28 @@ void bsp_crash_report(void)
         log_printf(" crash stack peak %u B of %u B",
                    (unsigned)bsp_stack_peak_bytes(),
                    (unsigned)bsp_stack_size_bytes());
-        bsp_crash_clear();
     }
+}
+
+uint8_t bsp_crash_print_saved(void)
+{
+    if (bsp_crash_valid() == 0u)
+    {
+        log_printf("crash = none recorded (cleared, or no fault since power on)");
+        return 0u;
+    }
+    crash_print_block();
+    return 1u;
+}
+
+void bsp_crash_report(void)
+{
+    /* Reset cause has to be read and cleared once, or it stays latched in
+     * the flags forever and every later boot looks the same. */
+    uint32_t csr = RCC->CSR;
+
+    crash_print_block();
+    bsp_crash_clear();
 
     log_printf("reset = pin %u por %u soft %u iwdg %u wwdg %u lowpwr %u ob %u",
                (unsigned)((csr & RCC_CSR_PINRSTF) ? 1u : 0u),

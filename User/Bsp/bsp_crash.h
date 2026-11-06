@@ -36,6 +36,11 @@ uint8_t bsp_crash_valid(void);
 /* Print the record and the reset cause, then wipe it. Call once per boot. */
 void bsp_crash_report(void);
 
+/* Print the stored crash block without clearing it. Returns 1 if a record was
+ * present. Lets the 'crash' command be read long after the reset, instead of
+ * having to catch the one-shot boot banner. */
+uint8_t bsp_crash_print_saved(void);
+
 /* Wipe the record (also used by bsp_crash_report). */
 void bsp_crash_clear(void);
 

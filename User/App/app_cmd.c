@@ -15,6 +15,7 @@
 #include "board_cfg.h"
 #include "bsp_adc.h"
 #include "bsp_cordic.h"
+#include "bsp_crash.h"
 #include "bsp_gpio.h"
 #include "bsp_imu.h"
 #include "bsp_prof.h"
@@ -131,6 +132,7 @@ static void print_help(void)
     log_printf(" ver            version and board info");
     log_printf(" stat           runtime status snapshot");
     log_printf(" uart           debug link state: ring, gState, retries");
+    log_printf(" crash [clear]  fault record kept in the backup registers");
     log_printf(" start          start (select a mode first)");
     log_printf(" stop           stop and shut the bridge down");
     log_printf(" mode <0|1|2>   0=IDLE 1=OPENLOOP 2=FOC");
@@ -915,7 +917,15 @@ static float   s_pll_zeta = PLL_ZETA;
         print_version();
     }
     /* ---------------- stat ---------------- */
-    else if (strcmp(tok[0], "uart") == 0) {
+    else if (strcmp(tok[0], "crash") == 0) {
+            if ((n > 1) && (strcmp(tok[1], "clear") == 0)) {
+                bsp_crash_clear();
+                log_printf("OK crash record cleared");
+            } else {
+                (void)bsp_crash_print_saved();
+            }
+        }
+        else if (strcmp(tok[0], "uart") == 0) {
         print_uart();
     }
     else if (strcmp(tok[0], "stat") == 0) {

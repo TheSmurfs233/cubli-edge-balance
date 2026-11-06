@@ -33,6 +33,11 @@ void bsp_crash_clear(void)
 {
 }
 
+uint8_t bsp_crash_print_saved(void)
+{
+    return s_reported;
+}
+
 uint8_t fake_crash_reported(void)
 {
     return s_reported;

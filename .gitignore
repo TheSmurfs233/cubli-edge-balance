@@ -1,4 +1,4 @@
-﻿# ---- 本工程临时产物 ----
+# ---- 本工程临时产物 ----
 .tmp_env/
 sim/__pycache__/
 __pycache__/
@@ -58,5 +58,6 @@ sim/.t20_*.npy
 
 # local scratch (monitor logs, disassembly dumps)
 mon_*.txt
+mon[0-9]*.txt
 MDK-ARM/.tmp_env_*.txt
 
