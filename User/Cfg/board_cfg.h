@@ -815,6 +815,16 @@ extern "C" {
 #define BAL_HELD_MNM            12.0f   /* law above this counts as "asking"  */
 #define BAL_HELD_DEG            1.0f    /* and only when clearly off balance */
 #define BAL_HELD_DPS            5.0f    /* body below this counts as "static" */
+
+/* Button start (2026-11-06).
+ * Holding KEY for BAL_KEY_HOLD_MS takes the pose being held as zero, arms the
+ * loop and engages it at once. That removes the race between "arm" and "let go":
+ * engage-on-release fired on hand tremor and slammed the wheel to the 1700 rpm
+ * trip line in 0.47 s (docs/00 #032). The first BAL_ENGAGE_RAMP_MS of the run
+ * ramp the torque ceiling, so an imperfect release position cannot become a
+ * full-scale command. */
+#define BAL_KEY_HOLD_MS         3000u
+#define BAL_ENGAGE_RAMP_MS      800u
 #define BAL_HELD_MS             150u    /* 30 frames at 200 Hz               */
 
 /* Engage-on-release. "bal run on" only arms: no torque flows until the body

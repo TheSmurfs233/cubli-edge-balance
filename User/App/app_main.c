@@ -597,6 +597,36 @@ uint8_t app_balance_arm(uint8_t on)
     return 0u;
 }
 
+uint8_t app_balance_start_now(void)
+{
+    uint8_t rc;
+
+    /* The operator is holding the cube where it is supposed to balance, so make
+     * that pose the zero. A guessed ATT_OFFSET_DEG sat 0.9 deg away from the
+     * real equilibrium once, which is ~5 mN.m of constant torque and a wheel
+     * that winds up to the trip line (sim/s6_disturb.py: 2 deg -> 1239 rpm). */
+    att_zero();
+
+    rc = app_balance_arm(1u);
+    if (rc != 0u)
+    {
+        return rc;                     /* attitude/window/drive refused it */
+    }
+
+    /* Engage now instead of waiting for the release edge: the button was pressed
+     * on purpose, and the ramp in app_balance_update() keeps the first commands
+     * small so a slightly-off release pose cannot saturate the wheel. */
+    s_engage_wait = 0u;
+    s_engage_cnt  = 0u;
+    s_run.engaged = 1u;
+    s_run.state   = (uint8_t)BAL_ST_ARMED;
+    s_run_t0      = HAL_GetTick();
+    s_run.run_ms  = 0u;
+    s_tau_cmd     = 0.0f;
+    s_held_frames = 0u;
+    return 0u;
+}
+
 void app_balance_update(void)
 {
     const att_state_t *a;
@@ -711,8 +741,23 @@ void app_balance_update(void)
 
     if (tau > (s_tau_cmd + BAL_SLEW_MNM_STEP)) { tau = s_tau_cmd + BAL_SLEW_MNM_STEP; }
     if (tau < (s_tau_cmd - BAL_SLEW_MNM_STEP)) { tau = s_tau_cmd - BAL_SLEW_MNM_STEP; }
-    if (tau > BAL_MAX_MNM)                     { tau = BAL_MAX_MNM; }
-    if (tau < -BAL_MAX_MNM)                    { tau = -BAL_MAX_MNM; }
+
+    /* Engage ramp. A button start engages while the hand is still on the cube,
+     * so the pose can be a fraction of a degree off zero -> kp alone asks for
+     * 20+ mN.m (22.9 mN.m/deg). Growing the ceiling over BAL_ENGAGE_RAMP_MS
+     * keeps that transient from turning into a full-scale wheel spin. */
+    {
+        uint32_t t_eng   = (uint32_t)(HAL_GetTick() - s_run_t0);
+        float    ceiling = BAL_MAX_MNM;
+
+        if (t_eng < (uint32_t)BAL_ENGAGE_RAMP_MS)
+        {
+            ceiling = BAL_MAX_MNM * ((float)t_eng / (float)BAL_ENGAGE_RAMP_MS);
+            if (ceiling < BAL_SLEW_MNM_STEP) { ceiling = BAL_SLEW_MNM_STEP; }
+        }
+        if (tau > ceiling)  { tau = ceiling; }
+        if (tau < -ceiling) { tau = -ceiling; }
+    }
 
     rc = app_torque_set(tau);
     s_run.drive_ret = rc;
@@ -2598,10 +2643,62 @@ const app_status_t *app_status(void)
 
 /* ------------------------------------------------------------------ */
 /* Key action                                                          */
+/*                                                                     */
+/* Short press : LED toggle, and disarm the loop if it is armed.        */
+/* Long press  : take the held pose as zero, arm and engage (S6 start). */
 /* ------------------------------------------------------------------ */
-static void key_action(void)
+static void key_action(uint32_t now)
 {
-    if (bsp_key_take_press()) {
+    static uint32_t s_key_t_down = 0u;
+    static uint8_t  s_key_hold_done = 0u;
+
+    if (bsp_key_is_down() != 0u)
+    {
+        if (s_key_t_down == 0u)
+        {
+            s_key_t_down = now;
+        }
+        if ((s_key_hold_done == 0u) &&
+            ((uint32_t)(now - s_key_t_down) >= (uint32_t)BAL_KEY_HOLD_MS))
+        {
+            uint8_t rc;
+
+            s_key_hold_done = 1u;
+            (void)bsp_key_take_press();        /* the release must not re-trigger */
+            rc = app_balance_start_now();
+            if (rc == 0u)
+            {
+                bsp_led_write(1u);
+                log_printf("[KEY] hold %u ms -> balance ENGAGED (zero taken)",
+                           (unsigned)BAL_KEY_HOLD_MS);
+            }
+            else
+            {
+                log_printf("[KEY] hold %u ms -> balance refused (rc %u)",
+                           (unsigned)BAL_KEY_HOLD_MS, (unsigned)rc);
+            }
+        }
+        return;
+    }
+
+    s_key_t_down = 0u;
+    if (s_key_hold_done != 0u)
+    {
+        s_key_hold_done = 0u;
+        (void)bsp_key_take_press();
+        return;                                /* the long press already acted */
+    }
+
+    if (bsp_key_take_press())
+    {
+        if (app_balance_info()->state != (uint8_t)BAL_ST_DISARMED)
+        {
+            (void)app_balance_arm(0u);
+            bsp_led_write(0u);
+            log_printf("[KEY] pressed -> balance DISARMED");
+            return;
+        }
+
         bsp_led_toggle();
         s_st.key_cnt = bsp_key_press_count();
         log_printf("[KEY] pressed #%u -> LED %s",
@@ -3106,7 +3203,7 @@ void app_loop(void)
     s_st.uptime_ms = now;
 
     bsp_key_poll(now);
-    key_action();
+    key_action(now);
 
     t = bsp_prof_now();
     app_cmd_poll();

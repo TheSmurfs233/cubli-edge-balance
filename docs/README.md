@@ -46,15 +46,16 @@
   - 上板：`ver`/`help`/`stat`/`imu`/`fault`/`vbus`/`enc`/`echo`/`prof` 全部可用；IMU `age 6 ms`、CRC 全 0
   - **IMU 姿态已提到 200 Hz**（`imu rate 200 save`，实测 199.78 帧/s，跨断电保持）
   - 电机带载全速段 300~2000 rpm 实测正常（2000 rpm 受电压极限钳在 1970 rpm）
-- 当前阶段：**S6 闭环平衡 —— 🟡 编排层已完成，等 S6a 上板**（[45_阶段方案_S6.md](45_阶段方案_S6.md)）；S1/S2/S3/S4 已完成（S5 首轮已采）
-  - 步骤 2~6 ✅：`bal_run_state_t` 状态机（TRIP 优先、六条 TRIP 锁存、新帧边沿、10 mN·m/5 ms slew）、`bal run on/off`、`PROF_BALRUN`、L2 `test_s6()` 32 条
-  - 首测降额从方案初稿的 0.4× 改为 **0.7×**（`sim/s6_scale_scan.py` 实测 0.4× 捕获窗口是 0.00°），ARM 窗口 2.5°
-  - 构建：0E0W，`Code=77564 RO=3432 RW=580 ZI=14212`；四门禁 11 / 15+13+17 / 684 / PASS
-  - 下一步：**S6a 上板（需请示）** —— 软垫 + 手放电源，`bal run on` 后 3 s 自动停，只判符号
+- 当前阶段：**S6 闭环平衡 —— 🟡 已实现约 14 s 自由平衡，等按钮长按启动的上板复测**（[45_阶段方案_S6.md](45_阶段方案_S6.md)）；S1/S2/S3/S4 已完成
+  - 已验证：连续三轮闭环 **13.8 / 14.3 / 14.0 s**、`trip none`、饱和 0~22 帧、`ATT_SIGN = +1` 确认
+  - 步骤 13（2026-11-06）：**按钮长按启动** —— 长按 KEY 3 s 一次完成「设零点 + 武装 + 立即接管 + 800 ms 软启动」，取代原来的"松手边沿"判据
+  - 构建：0E0W，`Code=79416 RO=3504 RW=616 ZI=14280`；四门禁 11 / 15+13+29 / 719 / PASS
+  - 现场约束：母线 ≤ 13 V（满电 4S 16 V 会让 LM317 过温、整板掉电，见 `90#L-18`）；每次上板按长按启动即可
+  - 下一步：烧 `Code=79416` 后长按启动复测，观察 `bal run` 的 `window` 能否稳定 ≥ 60 s
 - 门禁（`bash test/verify.sh` 一键跑完，全绿）：
   - 门 1 `test/check_binding.py`：11 项跨文件绑定（DMA 通道、串口实例、波特率、环形模式、纯 ASCII），已通过负向验证
-  - 门 2 `test/l1/run.sh`：把 `User/Mid/mid_fdilink.c` 原样在 gcc 下编译，15 项合成帧对拍
-  - 门 3 `test/host/build.sh`：WSL gcc + fake HAL 跑真实固件源码，594 项断言（含 IMU 5 个 section）
+  - 门 2 `test/l1/run.sh`：gcc 直接编译 `User/Mid/mid_fdilink.c`、`mid_att.c`、`alg_bal.c`，15 + 13 + 29 项对拍
+  - 门 3 `test/host/build.sh`：WSL gcc + fake HAL 跑真实固件源码，**719 项断言**（IMU、姿态、力矩、影子、闭环、按钮启动）
   - 门 4 `test/doc_check.py`：文档一致性（乱码、纯 ASCII、表格列数、版本号、陈旧措辞）
   - 固件 Keil 构建是 Windows 独有门禁，需单独跑（见 `test/README.md`）
 - 固件版本：`FW_BUILD_ID = 1`，横幅 `cubli/STM32G431KBT6`

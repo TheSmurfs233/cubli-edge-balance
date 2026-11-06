@@ -3478,6 +3478,55 @@ static void test_s6(void)
 }
 
 /* ================================================================== */
+/* S6 button start: one long press must zero the held pose, arm and        */
+/* engage, and the first commands must be ramped so an imperfect release   */
+/* pose cannot become a full-scale wheel spin.                             */
+static void test_balkey(void)
+{
+    const app_bal_run_t *r;
+    float tau0;
+
+    section("balkey: refuses while the bridge is idle");
+    cmd_feed("stop\r\n");
+    pump_all();
+    T(app_balance_start_now() == 5u);          /* drive not ready */
+    T(app_balance_info()->state == BAL_ST_DISARMED);
+    section_end();
+
+    section("balkey: zero, arm and engage in one call");
+    cmd_feed("mode 2\r\n");
+    force_current_ready();
+    cmd_feed("start\r\n");
+    att_feed_rate(0.4f, 0.0f, 90u);
+    s6_pump();
+    tx_clear();
+    T(app_balance_start_now() == 0u);
+    r = app_balance_info();
+    T(r->engaged == 1u);
+    T(r->state == BAL_ST_ARMED);
+    T(fabsf(att_get()->theta_deg) < 0.01f);    /* the held pose became zero */
+    section_end();
+
+    section("balkey: first command is ramped, not full scale");
+    /* 2 deg through kp*BAL_SCALE is about 16 mN.m; at t=0 the ramp keeps the
+     * ceiling at one slew step, and only opens up as the timer advances. */
+    att_feed_rate(2.0f, 0.0f, 91u);
+    s6_pump();
+    tau0 = fabsf(app_balance_info()->tau_applied_mnm);
+    T(tau0 <= BAL_SLEW_MNM_STEP + 0.01f);
+    T(tau0 > 0.0f);
+
+    fake_tick_add((uint32_t)BAL_ENGAGE_RAMP_MS + 20u);
+    att_feed_rate(2.0f, 0.0f, 92u);
+    s6_pump();
+    T(fabsf(app_balance_info()->tau_applied_mnm) > tau0 + 1.0f);
+    section_end();
+
+    cmd_feed("bal run off\r\n");
+    cmd_feed("stop\r\n");
+}
+
+/* ================================================================== */
 static void banner_reset(void)
 {
     /* app_init() prints a boot banner that is still sitting in the firmware
@@ -3514,6 +3563,7 @@ int main(void)
     printf("\n[torque interface]\n"); test_torque();
     printf("\n[balance law]\n");      test_bal();
     printf("\n[balance loop]\n");     test_s6();
+    printf("\n[button start]\n");      test_balkey();
 
     printf("\n============================\n");
     printf("checks: %d   failed: %d\n", g_checks, g_fails);

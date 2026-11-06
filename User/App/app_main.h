@@ -375,6 +375,11 @@ typedef struct {
  * 3 = tilt rate too high; 4 = wheel spinning too fast;
  * 5 = drive not ready (see app_bal_run()->drive_ret); 6 = already armed. */
 uint8_t app_balance_arm(uint8_t on);
+
+/* Button start: take the pose being held as zero, arm, and engage at once.
+ * Returns the same codes as app_balance_arm() (0 = engaged). */
+uint8_t app_balance_start_now(void);
+
 void    app_balance_update(void);
 const app_bal_run_t *app_balance_info(void);
 const char *app_balance_state_name(uint8_t st);
