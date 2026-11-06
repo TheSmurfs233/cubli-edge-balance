@@ -98,6 +98,7 @@ void mid_enc_last_frame(uint8_t out[4]);
  * normal phase; anything else means the reader sits "n" bits late and the
  * search recovered the frame anyway (18#L-16). */
 uint8_t mid_enc_win(void);
+uint8_t mid_enc_data_bytes(void);
 
 #ifdef __cplusplus
 }

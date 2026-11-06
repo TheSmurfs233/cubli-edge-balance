@@ -141,6 +141,25 @@ void mid_enc_last_frame(uint8_t out[4])
 }
 
 
+/* How many of the four captured bytes actually carried data.
+ *
+ * The MT6701 drives its 24-bit word and then releases the line, so the first
+ * 0xFF byte marks where it stopped. 3 means two data bytes + idle - the
+ * symptom of a bit counter parked inside the word (docs/00 #053).
+ * */
+uint8_t mid_enc_data_bytes(void)
+{
+    uint8_t i;
+
+    for (i = 0u; i < BSP_SSI_FRAME_LEN; i++) {
+        if (s_last[i] == 0xFFu) {
+            return i;
+        }
+    }
+    return (uint8_t)BSP_SSI_FRAME_LEN;
+}
+
+
 uint8_t mid_enc_win(void)
 {
     return s_win;
@@ -293,7 +312,11 @@ void mid_enc_update(void)
          * Counting both as "late" made the stopped state look broken
          * (late == frames), so only the first case is counted. */
         if (bsp_ssi_busy() != 0u) {
+            /* A transfer is still shifting. Never re-arm on top of it: doing
+             * that aborted the frame mid-shift, which is what left the MT6701
+             * stuck at bit 8 (docs/00 #052, #053). Just wait for the DMA. */
             s_enc.late++;
+            return;
         }
         bsp_ssi_start();
         return;
@@ -337,6 +360,12 @@ void mid_enc_update(void)
         s_enc.crc_errs++;
         s_enc.raw = (uint16_t)((w32 >> 18) & 0x3FFFu);
         s_enc.mg  = (uint8_t)((w32 >> 14) & 0x0Fu);
+        if (bsp_ssi_busy() != 0u) {
+            /* Another caller already armed the next frame. Aborting or
+             * resyncing now would cut it mid-shift and make the next read
+             * worse, so leave the bus alone and let that frame finish. */
+            return;
+        }
         if (++s_bad_run >= ENC_BAD_RUN_RESYNC) {
             s_bad_run = 0u;
             bsp_ssi_resync();

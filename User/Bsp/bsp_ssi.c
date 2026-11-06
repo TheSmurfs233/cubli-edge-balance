@@ -41,7 +41,12 @@ extern SPI_HandleTypeDef hspi1;
  * was optimised into nothing by the compiler, so the pause never happened and
  * the reader stayed misaligned (resync ran 2586 times in 30 s without one good
  * frame afterwards). Count DWT cycles instead. */
-#define SSI_RESYNC_QUIET_US   300u
+/* 2500us, not 300us: measured on the target 2026-11-07, the MT6701 keeps
+ * counting clocks across a short CSN-high gap, so a 300us pause restarted
+ * the shift engine inside the still-open frame and the reader stayed at
+ * bit 8 forever (four-byte frame with the idle 0xFF in the middle). Only a
+ * millisecond-scale silence drives the internal bit counter back to 0. */
+#define SSI_RESYNC_QUIET_US   2500u
 
 static volatile uint8_t s_rx[BSP_SSI_FRAME_LEN];
 static volatile uint8_t s_busy;

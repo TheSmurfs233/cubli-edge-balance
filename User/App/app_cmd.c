@@ -2011,6 +2011,10 @@ static float   s_pll_zeta = PLL_ZETA;
         log_printf(" bytes = %02x %02x %02x %02x (window +%u bit)",
                    (unsigned)f[0], (unsigned)f[1], (unsigned)f[2], (unsigned)f[3],
                    (unsigned)mid_enc_win());
+        /* A short frame means the sensor stopped driving mid-word, i.e. its bit
+         * counter is parked inside the 24-bit word (docs/00 #053). */
+        log_printf(" frame = %u of %u data byte(s)",
+                   (unsigned)mid_enc_data_bytes(), (unsigned)BSP_SSI_FRAME_LEN);
         log_printf(" raw   = %u, mg %u, %s",
                    (unsigned)e->raw, (unsigned)e->mg,
                    (e->crc_ok != 0u) ? "crc ok" : "crc BAD");
