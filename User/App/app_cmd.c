@@ -266,8 +266,9 @@ static void print_stat(void)
                (unsigned)bsp_sys_fpccr(), (unsigned)bsp_sys_fpcar(),
                (unsigned)app_guard_lspact(),
                (bsp_sys_fpu_eager_get() != 0u) ? "eager" : "lazy");
-    log_printf(" enc      = badrun %u, resync %u, ovr %u",
+    log_printf(" enc      = badrun %u, resync %u (busy %u), ovr %u",
                (unsigned)mid_enc_bad_run(), (unsigned)bsp_ssi_resync_count(),
+               (unsigned)bsp_ssi_resync_busy_count(),
                (unsigned)bsp_ssi_ovr_count());
     log_printf(" stack    = peak %u B of %u B",
                (unsigned)bsp_stack_peak_bytes(),
@@ -2027,8 +2028,9 @@ static float   s_pll_zeta = PLL_ZETA;
         log_printf(" raw   = %u, mg %u, %s",
                    (unsigned)e->raw, (unsigned)e->mg,
                    (e->crc_ok != 0u) ? "crc ok" : "crc BAD");
-        log_printf(" errs  = badrun %u, resync %u, ovr %u, crc %u/%u",
+        log_printf(" errs  = badrun %u, resync %u (busy %u), ovr %u, crc %u/%u",
                    (unsigned)mid_enc_bad_run(), (unsigned)bsp_ssi_resync_count(),
+                   (unsigned)bsp_ssi_resync_busy_count(),
                    (unsigned)bsp_ssi_ovr_count(),
                    (unsigned)e->crc_errs, (unsigned)e->frames);
     }

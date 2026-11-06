@@ -88,6 +88,11 @@ uint8_t bsp_ssi_quiet(void)
     return fake_ssi_quiet;
 }
 
+uint32_t bsp_ssi_resync_busy_count(void)
+{
+    return fake_ssi_resyncs;    /* every host resync comes from the wedged path */
+}
+
 uint32_t bsp_ssi_resync_count(void)
 {
     return fake_ssi_resyncs;

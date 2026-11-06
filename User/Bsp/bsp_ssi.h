@@ -72,21 +72,13 @@ void bsp_ssi_force_resync(void);
  * watch for "no new frame" must not treat that window as a stall. */
 uint8_t bsp_ssi_quiet(void);
 
-/* Park the bus right now, even if a frame is in flight. Last resort for a
- * transfer that never completes: waiting cannot fix that, and the bit-level
- * slip it causes is recoverable once the slave sees a real clock silence. */
-void bsp_ssi_force_resync(void);
-
-/* 1 while the bus is inside its forced silence after a resync. Callers that
- * watch for "no new frame" must not treat that window as a stall. */
-uint8_t bsp_ssi_quiet(void);
-
-/* How many times bsp_ssi_resync() ran since power on. */
+/* Bus parks since power on, and how many of them were forced by a wedged frame. */
 uint32_t bsp_ssi_resync_count(void);
+uint32_t bsp_ssi_resync_busy_count(void);
 
 /* Blocking convenience wrapper (start + spin until done).
  * Returns 0 on success, non-zero if the transfer failed. */
-uint8_t bsp_ssi_read(uint8_t frame[3]);
+uint8_t bsp_ssi_read(uint8_t frame[BSP_SSI_FRAME_LEN]);
 
 /* Diagnostic: SPI1 CR1 and RCC_CCIPR2, used by the "enc bench" command. */
 void bsp_ssi_diag(uint32_t *cr1, uint32_t *ccipr2);

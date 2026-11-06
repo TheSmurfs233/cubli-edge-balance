@@ -1071,39 +1071,33 @@ static void test_enc(void)
     }
     section_end();
 
-    section("enc: a run of bad frames escalates to a clock-pause resync");
+    section("enc: bad frames are counted but never park the bus");
     {
         uint8_t k;
 
-        /* One bad frame must only flush (abort); the reader is usually fine
-         * again on the next frame, and a 260us clock pause on every glitch
-         * would cost more than it saves. */
+        /* A byte-level slip is fixed by the rotation decoder on the next frame.
+         * Parking the bus to "recover" costs 2.5 ms of stale angle and starved
+         * the FOC vector on hardware (buzzing, no torque, measured 2026-11-07),
+         * so a run of bad frames must only be counted now. */
         fake_ssi_resyncs = 0u;
         enc_build_frame(1000u, 0u);
         mid_enc_update();                       /* good frame: run = 0 */
         T(mid_enc_bad_run() == 0u);
-        for (k = 0u; k < 4u; k++) {
+
+        for (k = 0u; k < 8u; k++) {
             enc_build_frame(1001u, 0u);
             fake_ssi_frame[2] ^= 0x01u;
             mid_enc_update();
         }
-        T(mid_enc_bad_run() == 4u);
-        T(fake_ssi_resyncs == 0u);
+        T(mid_enc_bad_run() == 8u);
+        T(fake_ssi_resyncs == 0u);              /* no park, no abort */
+        T(bsp_ssi_resync_count() == 0u);
 
-        /* The fifth failure in a row is the misaligned-reader case: pause the
-         * clock instead of aborting once more (18#L-16). */
-        enc_build_frame(1002u, 0u);
-        fake_ssi_frame[2] ^= 0x01u;
-        mid_enc_update();
-        T(fake_ssi_resyncs == 1u);
-        T(mid_enc_bad_run() == 0u);
-        T(bsp_ssi_resync_count() == 1u);
-
-        /* A good frame clears the run, so two separate glitches do not add up
-         * to a resync. */
+        /* A good frame clears the run. */
         enc_build_frame(1003u, 0u);
         mid_enc_update();
         T(mid_enc_bad_run() == 0u);
+        T(mid_enc_info()->crc_ok == 1u);
     }
     section_end();
 

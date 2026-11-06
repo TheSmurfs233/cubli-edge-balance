@@ -397,13 +397,13 @@ void mid_enc_update(void)
              * worse, so leave the bus alone and let that frame finish. */
             return;
         }
-        if (++s_bad_run >= ENC_BAD_RUN_RESYNC) {
-            s_bad_run = 0u;
-            bsp_ssi_resync();
-        } else {
-            bsp_ssi_abort();
-        }
-        bsp_ssi_start();
+        /* Count the run so "ssi" can show it, but do not touch the bus: a
+         * byte-level slip is recovered by the rotation decoder on the very
+         * next frame, and parking the bus costs 2.5 ms of stale angle (50
+         * control frames), which starves the FOC vector and makes the motor
+         * buzz instead of producing torque (measured 2026-11-07). */
+        s_bad_run++;
+        bsp_ssi_start();        /* keep arming: the next frame may decode */
         return;
     }
     s_bad_run = 0u;

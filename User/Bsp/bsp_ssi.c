@@ -51,7 +51,8 @@ extern SPI_HandleTypeDef hspi1;
 static volatile uint8_t s_rx[BSP_SSI_FRAME_LEN];
 static volatile uint8_t s_busy;
 static volatile uint32_t s_ovr;   /* SPI RX overruns (a byte was lost) */
-static volatile uint32_t s_resyncs; /* bsp_ssi_resync() calls */
+static volatile uint32_t s_resyncs; /* bus parks (force resync) */
+static volatile uint32_t s_resync_busy; /* parks forced by a wedged frame */
 static volatile uint32_t s_quiet_until; /* DWT tick before which the clock must stay idle */
 static volatile uint8_t  s_quiet_pend;  /* 1 = SPE is off, waiting for the silence to expire */
 static volatile uint8_t  s_resync_pend; /* 1 = park the bus as soon as the frame lands */
@@ -305,7 +306,13 @@ void bsp_ssi_force_resync(void)
     if (s_cfg_err != 0u) {
         return;
     }
-    ssi_park();                 /* parks, silences and re-counts s_resyncs */
+    s_resync_busy++;
+    ssi_park();                 /* parks, silences and counts the resync */
+}
+
+uint32_t bsp_ssi_resync_busy_count(void)
+{
+    return s_resync_busy;
 }
 
 uint8_t bsp_ssi_quiet(void)
