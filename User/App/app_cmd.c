@@ -24,6 +24,7 @@
 #include "bsp_ssi.h"
 #include "bsp_uart.h"
 #include "bsp_stack.h"
+#include "bsp_sys.h"
 #include "mid_att.h"
 #include "mid_current.h"
 #include "mid_enc.h"
@@ -133,6 +134,7 @@ static void print_help(void)
     log_printf(" stat           runtime status snapshot");
     log_printf(" uart           debug link state: ring, gState, retries");
     log_printf(" crash [clear]  fault record kept in the backup registers");
+    log_printf(" fpu            FP lazy-stacking state; 'fpu eager on|off' switches it");
     log_printf(" start          start (select a mode first)");
     log_printf(" stop           stop and shut the bridge down");
     log_printf(" mode <0|1|2>   0=IDLE 1=OPENLOOP 2=FOC");
@@ -257,8 +259,12 @@ static void print_stat(void)
                (unsigned)bsp_uart_rx_drop_count(),
                (unsigned)bsp_uart_tx_pending(),
                (unsigned)bsp_uart_tx_stuck_count());
-    log_printf(" guard    = cpacr repairs %u",
-               (unsigned)app_guard_cpacr_bad());
+    log_printf(" guard    = cpacr repairs %u, r4clob %u",
+               (unsigned)app_guard_cpacr_bad(), (unsigned)app_guard_r4_count());
+    log_printf(" fpu      = fpccr %x, fpcar %x, lspact seen %u, save %s",
+               (unsigned)bsp_sys_fpccr(), (unsigned)bsp_sys_fpcar(),
+               (unsigned)app_guard_lspact(),
+               (bsp_sys_fpu_eager_get() != 0u) ? "eager" : "lazy");
     log_printf(" stack    = peak %u B of %u B",
                (unsigned)bsp_stack_peak_bytes(),
                (unsigned)bsp_stack_size_bytes());
@@ -923,6 +929,25 @@ static float   s_pll_zeta = PLL_ZETA;
                 log_printf("OK crash record cleared");
             } else {
                 (void)bsp_crash_print_saved();
+            }
+        }
+        else if (strcmp(tok[0], "fpu") == 0) {
+            if ((n >= 3) && (strcmp(tok[1], "eager") == 0)) {
+                if (strcmp(tok[2], "on") == 0) {
+                    bsp_sys_fpu_eager(1);
+                    log_printf("OK fpu save = eager (ASPEN/LSPEN cleared)");
+                } else if (strcmp(tok[2], "off") == 0) {
+                    bsp_sys_fpu_eager(0);
+                    log_printf("OK fpu save = lazy (ASPEN/LSPEN set)");
+                } else {
+                    log_printf("ERR usage=fpu eager <on|off>");
+                }
+            } else {
+                log_printf("fpu = save %s, fpccr %x, fpcar %x, lspact seen %u",
+                           (bsp_sys_fpu_eager_get() != 0u) ? "eager" : "lazy",
+                           (unsigned)bsp_sys_fpccr(), (unsigned)bsp_sys_fpcar(),
+                           (unsigned)app_guard_lspact());
+                log_printf(" usage: fpu eager on|off  (lazy = default, eager = save FP context on every entry)");
             }
         }
         else if (strcmp(tok[0], "uart") == 0) {

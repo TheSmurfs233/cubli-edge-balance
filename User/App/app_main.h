@@ -341,6 +341,13 @@ uint8_t app_bal_snap(void);
 
 /* Number of times the FPU enable bits in CPACR had to be restored. */
 uint32_t app_guard_cpacr_bad(void);
+
+/* Counts callee-saved r4 clobbers seen across alg_bal_step(). */
+void     app_guard_r4_bad(uint32_t before, uint32_t after);
+uint32_t app_guard_r4_count(void);
+
+/* How many guard passes saw FPCCR.LSPACT set while normal code was running. */
+uint32_t app_guard_lspact(void);
 /* Evaluate once. Called from app_loop(); also from blocking commands so the
  * sample they print is the newest one. */
 void app_bal_update(void);

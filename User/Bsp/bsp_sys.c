@@ -23,3 +23,64 @@ void bsp_sys_init(void)
 {
     FLASH->ACR |= (FLASH_ACR_PRFTEN | FLASH_ACR_ICEN);
 }
+
+uint32_t bsp_sys_fpccr(void)
+{
+#ifdef FPU
+    return FPU->FPCCR;
+#else
+    return 0u;   /* host test build: the fake HAL has no core peripherals */
+#endif
+}
+
+void bsp_sys_fpu_eager(uint8_t on)
+{
+#ifdef FPU
+    if (on != 0u)
+    {
+        /* Clear LSPEN first, then ASPEN: with LSPACT already clear (checked by
+         * the guard) neither bit can leave a save outstanding. */
+        FPU->FPCCR &= ~(FPU_FPCCR_LSPEN_Msk | FPU_FPCCR_ASPEN_Msk);
+    }
+    else
+    {
+        FPU->FPCCR |= (FPU_FPCCR_ASPEN_Msk | FPU_FPCCR_LSPEN_Msk);
+    }
+    __DSB();
+    __ISB();
+#else
+    (void)on;
+#endif
+}
+
+uint8_t bsp_sys_fpu_eager_get(void)
+{
+#ifdef FPU
+    return ((FPU->FPCCR & (FPU_FPCCR_LSPEN_Msk | FPU_FPCCR_ASPEN_Msk)) == 0u) ? 1u : 0u;
+#else
+    return 1u;
+#endif
+}
+
+uint32_t bsp_sys_fpcar(void)
+{
+#ifdef FPU
+    return FPU->FPCAR;
+#else
+    return 0u;
+#endif
+}
+
+#if defined(__CC_ARM)
+__asm uint32_t bsp_sys_get_r4(void)
+{
+    PRESERVE8
+    MOV     r0, r4
+    BX      lr
+}
+#else
+uint32_t bsp_sys_get_r4(void)
+{
+    return 0u;   /* host build: no register to sample */
+}
+#endif

@@ -163,7 +163,9 @@ void bsp_crash_hold(void)
     /* The blink count names the exception that fired, so a bench test does not
      * need a console: 5 = HardFault, 4 = MemManage, 3 = BusFault, 2 = Usage. */
     uint32_t kind = *crash_slot(CRASH_SLOT_KIND);
-    uint32_t blinks = (kind >= BSP_CRASH_KIND_USAGE) ? 2u : (6u - kind);
+    /* Every kind is >= 2, so the old form always blinked twice and told the
+     * operator nothing. 5 -> 1 blink, 4 -> 2, 3 -> 3, 2 -> 4. */
+    uint32_t blinks = ((kind >= 2u) && (kind <= 5u)) ? (6u - kind) : 2u;
 
     /* Slow enough to read at a glance. The first version used 400k and 4M
      * NOPs, which at 170 MHz is 2.4 ms on / 2.4 ms off / 24 ms gap: the eye
