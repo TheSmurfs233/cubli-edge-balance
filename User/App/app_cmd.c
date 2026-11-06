@@ -161,6 +161,7 @@ static void print_help(void)
     log_printf(" att [zero|stat <s>]  body pitch, rate, zero and noise window");
     log_printf(" bal [on|off|log <s>] balance law, shadow mode (never drives)");
     log_printf(" bal trim <deg> move the zero so the wheel stops winding up");
+    log_printf(" bal snap       one step: trim -= wheel / 573 rpm-per-deg");
     log_printf(" bal auto [on|off] let the wheel speed walk the zero (default on)");
     log_printf(" bal run [on|off] closed loop with interlocks -- moves the motor");
     log_printf(" imu rate <hz> [save]  set the 0x41 AHRS packet rate (10..200)");
@@ -965,9 +966,12 @@ static float   s_pll_zeta = PLL_ZETA;
             uint8_t rc = app_bal_snap();
 
             if (rc == 0u) {
-                log_printf("OK bal snap: trim %.2f deg, wheel %+.0f rpm",
-                           (double)app_bal_trim_get(),
-                           (double)app_bal_info()->omega_rpm);
+                double w = (double)app_bal_info()->omega_rpm;
+                const char *sgn = (w < 0.0) ? "-" : "+";
+
+                /* log_printf has no + flag: print the sign ourselves. */
+                log_printf("OK bal snap: trim %.2f deg, wheel %s%.0f rpm",
+                           (double)app_bal_trim_get(), sgn, (w < 0.0) ? -w : w);
             } else if (rc == 2u) {
                 log_printf("ERR bal snap: no running loop, use the button or \"bal run on\"");
             } else if (rc == 3u) {
