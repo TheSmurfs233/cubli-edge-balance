@@ -41,9 +41,8 @@ typedef struct
   float trim_deg;        /**< initial zero trim, deg (positive = lean back) */
   float trim_clamp_deg;  /**< adaptation is clamped to +-this, deg     */
   float trim_gate_deg;   /**< adapt only while |phi| stays under this  */
-  float trim_adapt_k;    /**< deg/s per mN.m of low-passed command;
-                              0 = freeze the trim (see alg_bal_adapt)  */
-  float trim_adapt_tau_s;/**< low-pass time constant on the command, s */
+  float trim_w_k;        /**< deg per rpm per second: the slow trim is
+                              walked by the wheel speed; 0 = frozen     */
 } alg_bal_cfg_t;
 
 /**
@@ -85,12 +84,21 @@ const alg_bal_out_t *alg_bal_get(void);
 /**
   * @brief  Advance the slow zero trim by dt (call once per new attitude frame).
   *
-  * A constant external torque (a cable, a hand, a slightly wrong zero) shows up
-  * as a constant command, and a constant command is wheel speed: the wheel runs
-  * away until the speed trip. Leaning the zero lets gravity carry that torque
-  * instead. The trim moves against the low-passed command at trim_adapt_k deg/s
-  * per mN.m, only while |phi| < trim_gate_deg, and stays inside
-  * +-trim_clamp_deg. trim_adapt_k = 0 freezes it (docs/45 4.12).
+  * In steady state gravity pins the body at the true balance point and the
+  * wheel parks at
+  *
+  *     omega_ss = (kp/kw) * (trim - phi_ss)
+  *
+  * so a zero error of z (= -phi_ss) is paid for entirely in wheel speed: on the
+  * bench, -2.32 deg of phi held 1340 rpm. The only knob that changes it is the
+  * trim, and the wheel speed is the error signal that says how far off it is:
+  *
+  *     trim -= trim_w_k * omega_rpm * dt        (deg per rpm per second)
+  *
+  * The sign is self-correcting: with the wheel turning the trim walks toward
+  * phi_ss, and it stops walking exactly when the wheel stops. Adaptation is
+  * gated by |phi| < trim_gate_deg and clamped to +-trim_clamp_deg.
+  * trim_w_k = 0 freezes it (docs/45 4.12, 4.17).
   *
   * @param  dt_s  time since the previous call, s (>0)
   */

@@ -62,8 +62,7 @@ static alg_bal_cfg_t cfg_make(float sign, float max_nm)
   c.trim_deg = 0.0f;         /* slow zero adaptation off by default */
   c.trim_clamp_deg = 0.0f;
   c.trim_gate_deg = 0.0f;
-  c.trim_adapt_k = 0.0f;
-  c.trim_adapt_tau_s = 0.5f;
+  c.trim_w_k = 0.0f;
 
   return c;
 }
@@ -208,65 +207,68 @@ int main(void)
   chk(near_mnm(out.tau_ff_nm, 2.05f, TOL_MNM) != 0,
       "16d ff is not flipped by cfg.sign");
 
-  /* 17. slow zero adaptation (docs/45 4.12). A constant command is a constant
-        disturbance, so leaning the zero against the low-passed command removes
-        the wheel wind-up. k = 0 must freeze it. */
+  /* 17. slow zero adaptation (docs/45 4.17). Gravity pins the body at the true
+        balance point, so the wheel speed is the zero error: omega_ss =
+        (kp/kw)*(trim - phi_ss). The trim is walked against the wheel, and the
+        walk stops by itself when the wheel stops. */
   cfg = cfg_make(1.0f, MAX_NM);
   cfg.trim_clamp_deg = 2.0f;
-  cfg.trim_gate_deg  = 3.0f;
-  cfg.trim_adapt_k   = 0.0f;            /* disabled */
+  cfg.trim_gate_deg  = 4.0f;
+  cfg.trim_w_k       = 0.0f;            /* frozen */
   alg_bal_init(&cfg);
-  for (i = 0; i < 400; i++)
+  for (i = 0; i < 200; i++)             /* 1 s at +500 rpm */
   {
-    alg_bal_step(1.0f * DEG2RAD, 0.0f, 0.0f, &out);
+    alg_bal_step(0.2f * DEG2RAD, 0.0f, 500.0f * RPM2RPS, &out);
     alg_bal_adapt(0.005f);
   }
-  chk((absf(alg_bal_trim_deg()) < 1e-6f) &&
-      (near_mnm(out.tau_nm, KP * 1.0f * DEG2RAD * 1000.0f, 0.02f) != 0),
-      "17a k = 0 leaves the trim alone");
+  chk(absf(alg_bal_trim_deg()) < 1e-6f,
+      "17a k = 0 leaves the trim alone even with the wheel turning");
 
-  cfg.trim_adapt_k = 0.1f;              /* the value in board_cfg.h */
+  cfg.trim_w_k = 3.0e-4f;               /* the value in board_cfg.h */
   alg_bal_init(&cfg);
-  for (i = 0; i < 100; i++)            /* 0.5 s: past the low-pass, below the clamp */
+  for (i = 0; i < 200; i++)             /* 1 s at +500 rpm -> -k*500*1 = -0.15 */
   {
-    alg_bal_step(1.0f * DEG2RAD, 0.0f, 0.0f, &out);
+    alg_bal_step(0.2f * DEG2RAD, 0.0f, 500.0f * RPM2RPS, &out);
     alg_bal_adapt(0.005f);
   }
-  /* Positive command (body leaning, loop pushing) must move the zero BACKWARD:
-     negative trim, and the command comes down with it. */
-  chk((alg_bal_trim_deg() < -0.02f) && (alg_bal_trim_deg() > -1.0f),
-      "17b positive command leans the zero backward");
-  alg_bal_step(1.0f * DEG2RAD, 0.0f, 0.0f, &out);   /* one step with the new trim */
-  chk(near_mnm(out.tau_nm,
-               KP * (1.0f - alg_bal_trim_deg()) * DEG2RAD * 1000.0f, 0.05f) != 0,
-      "17c the trim lowers the command (0.5 s of adaptation)");
+  chk((alg_bal_trim_deg() < -0.13f) && (alg_bal_trim_deg() > -0.17f),
+      "17b a forward wheel walks the trim backward at k*wheel");
 
-  /* 18. clamp: keep adapting for a long time, the trim stops at -clamp */
-  for (i = 0; i < 40000; i++)
+  alg_bal_init(&cfg);
+  for (i = 0; i < 200; i++)             /* the mirror case */
   {
-    alg_bal_step(1.0f * DEG2RAD, 0.0f, 0.0f, &out);
+    alg_bal_step(-0.2f * DEG2RAD, 0.0f, -500.0f * RPM2RPS, &out);
+    alg_bal_adapt(0.005f);
+  }
+  chk((alg_bal_trim_deg() > 0.13f) && (alg_bal_trim_deg() < 0.17f),
+      "17c a backward wheel walks the trim forward");
+
+  /* 18. clamp: a wheel that never stops cannot walk the trim forever */
+  for (i = 0; i < 20000; i++)
+  {
+    alg_bal_step(0.0f, 0.0f, 900.0f * RPM2RPS, &out);
     alg_bal_adapt(0.005f);
   }
   chk(absf(alg_bal_trim_deg() + 2.0f) < 0.01f,
-      "18 the trim clamps at -BAL_TRIM_MAX_DEG");
+      "18 the walk clamps at -BAL_TRIM_MAX_DEG");
 
-  /* 19. gate: outside trim_gate_deg the trim must not move at all */
-  cfg.trim_adapt_k = 0.1f;
+  /* 19. gate: outside trim_gate_deg the body is still being captured */
+  cfg.trim_w_k = 3.0e-4f;
   alg_bal_init(&cfg);
-  for (i = 0; i < 400; i++)
+  for (i = 0; i < 200; i++)
   {
-    alg_bal_step(6.0f * DEG2RAD, 0.0f, 0.0f, &out);   /* 6 deg > 3 deg gate */
+    alg_bal_step(6.0f * DEG2RAD, 0.0f, 500.0f * RPM2RPS, &out);  /* > 4 deg */
     alg_bal_adapt(0.005f);
   }
-  chk(absf(alg_bal_trim_deg()) < 1e-6f, "19 no adaptation outside the gate");
+  chk(absf(alg_bal_trim_deg()) < 1e-6f, "19 no walk outside the gate");
 
   /* 20. manual trim: clamped, reported, and used by the next step */
-  cfg.trim_adapt_k = 0.0f;
+  cfg.trim_w_k = 0.0f;
   alg_bal_init(&cfg);
   chk(absf(alg_bal_trim_set(9.0f) - 2.0f) < 1e-3f,
       "20a manual trim is clamped to +2 deg");
   chk(absf(alg_bal_trim_set(-9.0f) + 2.0f) < 1e-3f,
-      "20b manual trim is clamped to -2 deg");;
+      "20b manual trim is clamped to -2 deg");
   alg_bal_trim_set(0.5f);
   alg_bal_step(0.0f, 0.0f, 0.0f, &out);
   chk((absf(alg_bal_trim_deg() - 0.5f) < 1e-4f) &&

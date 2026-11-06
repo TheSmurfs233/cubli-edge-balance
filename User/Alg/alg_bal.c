@@ -23,8 +23,6 @@ static alg_bal_out_t s_out;
 static uint8_t       s_ready;
 static float         s_ff_sgn;   /* last feed-forward direction, +-1 or 0 */
 static float         s_trim_rad; /* zero trim in use, rad                 */
-static float         s_law_mnm;  /* last law output before ff, mN.m       */
-static float         s_u_lp_mnm; /* low-passed law output, mN.m           */
 static float         s_phi_deg;  /* last true body angle, deg             */
 
 /* ------------------------------------------------------------------------- */
@@ -80,8 +78,7 @@ void alg_bal_init(const alg_bal_cfg_t *cfg)
   s_cfg.trim_deg        = 0.0f;
   s_cfg.trim_clamp_deg  = 0.0f;
   s_cfg.trim_gate_deg   = 0.0f;
-  s_cfg.trim_adapt_k    = 0.0f;
-  s_cfg.trim_adapt_tau_s = 0.0f;
+  s_cfg.trim_w_k        = 0.0f;
   s_ready         = 0u;
 
   if (cfg != 0)
@@ -115,8 +112,6 @@ void alg_bal_reset(void)
   s_ff_sgn         = 0.0f;
   s_trim_rad       = s_cfg.trim_deg * 0.01745329252f;
   s_out.trim_deg   = s_cfg.trim_deg;
-  s_law_mnm        = 0.0f;
-  s_u_lp_mnm       = 0.0f;
   s_phi_deg        = 0.0f;
 }
 
@@ -124,25 +119,15 @@ void alg_bal_adapt(float dt_s)
 {
   float lim;
   float gate;
+  float rpm;
 
   if ((s_ready == 0u) || (dt_s <= 0.0f))
   {
     return;
   }
-  if (s_cfg.trim_adapt_k <= 0.0f)
+  if (s_cfg.trim_w_k <= 0.0f)
   {
     return;
-  }
-
-  /* Low-pass the law output: the DC part is the disturbance the loop is
-     holding, the AC part is the balancing action and must not move the trim. */
-  if (s_cfg.trim_adapt_tau_s > 0.0f)
-  {
-    s_u_lp_mnm += (s_law_mnm - s_u_lp_mnm) * (dt_s / s_cfg.trim_adapt_tau_s);
-  }
-  else
-  {
-    s_u_lp_mnm = s_law_mnm;
   }
 
   gate = s_cfg.trim_gate_deg;
@@ -153,11 +138,11 @@ void alg_bal_adapt(float dt_s)
     return;
   }
 
-  /* A positive command means the loop is holding the body against a forward
-     push, so the zero moves BACKWARD and gravity takes the load over:
-     mgh * sin(trim) = -(ext + tau_f). Advancing the trim lowers the command,
-     which is what stops the wheel from winding up. */
-  s_trim_rad -= (s_cfg.trim_adapt_k * s_u_lp_mnm * 0.01745329252f) * dt_s;
+  /* In steady state omega_ss = (kp/kw)*(trim - phi_ss): the wheel speed IS the
+     zero error. Walking the trim against the wheel makes that error vanish, and
+     the walk stops by itself when the wheel stops. */
+  rpm = s_out.omega_rps * 9.5492966f;
+  s_trim_rad -= (s_cfg.trim_w_k * rpm * 0.01745329252f) * dt_s;
 
   lim = s_cfg.trim_clamp_deg * 0.01745329252f;
   if (lim > 0.0f)
@@ -214,7 +199,6 @@ void alg_bal_step(float phi_rad, float dphi_rps, float omega_rps,
 
   /* Remembered for alg_bal_adapt(): the raw law output (before the mounting
      sign, before feed-forward) is what tells the slow trim which way to lean. */
-  s_law_mnm = tau * 1000.0f;
   s_phi_deg = phi_rad * 57.2957795f;
 
   tau *= s_cfg.sign;

@@ -330,6 +330,9 @@ const app_bal_info_t *app_bal_info(void);
  * actually stored so the caller can print it. */
 float app_bal_trim_set(float deg);
 float app_bal_trim_get(void);
+void  app_bal_trim_learn(float deg);
+void  app_bal_auto_set(uint8_t on);
+uint8_t app_bal_auto_get(void);
 /* Evaluate once. Called from app_loop(); also from blocking commands so the
  * sample they print is the newest one. */
 void app_bal_update(void);

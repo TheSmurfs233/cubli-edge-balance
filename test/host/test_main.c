@@ -3207,11 +3207,11 @@ static void test_bal(void)
     tx_clear();
     cmd_feed("bal trim 9\r\n");
     pump_all();
-    T(tx_contains("OK bal trim 2.00 deg"));
+    T(tx_contains("OK bal trim 3.00 deg"));
     tx_clear();
     cmd_feed("bal trim\r\n");
     pump_all();
-    T(tx_contains("trim   = 2.00 deg"));
+    T(tx_contains("trim   = 3.00 deg"));
     T(fabsf(app_bal_trim_get() - BAL_TRIM_MAX_DEG) < 0.001f);
     tx_clear();
     cmd_feed("bal trim x\r\n");
@@ -3378,7 +3378,11 @@ static void test_s6(void)
     T(app_torque_get() == 0.0f);
     section_end();
 
-    section("s6: trip on the run time limit");
+    section("s6: no time limit by default (BAL_MAX_MS == 0)");
+    /* The window used to end otherwise healthy runs at 60 s on the board
+     * (2026-11-06: 60 001 ms, trip timeout, phi peak 0.86 deg). It is off now,
+     * so a long run must survive: only a real interlock may end it. */
+    T(BAL_MAX_MS == 0u);
     cmd_feed("bal run off\r\n");   /* clear the stale latch first */
     cmd_feed("mode 2\r\n");
     cmd_feed("start\r\n");
@@ -3387,13 +3391,22 @@ static void test_s6(void)
     tx_clear();
     cmd_feed("bal run on\r\n");
     pump_all();
-    T(tx_contains("OK bal run armed"));
-    fake_tick_add((uint32_t)BAL_MAX_MS + 100u);
-    att_feed(0.2f, 76u);      /* keep the attitude fresh so the age guard is not first */
+    T(tx_contains("no time limit"));
+    /* Engage first (three frames of motion), then jump the clock. */
+    att_feed_rate(0.2f, 30.0f, 76u);
+    s6_pump();
+    att_feed_rate(0.2f, 30.0f, 77u);
+    s6_pump();
+    att_feed_rate(0.2f, 30.0f, 78u);
+    s6_pump();
+    T(app_balance_info()->engaged == 1u);
+    fake_tick_add(120000u);   /* two minutes of running */
+    att_feed(0.2f, 79u);      /* keep the attitude fresh so the age guard is not first */
     s6_pump();
     r = app_balance_info();
-    T(r->state == BAL_ST_TRIP);
-    T(r->trip == (uint8_t)BAL_TRIP_TIMEOUT);
+    T(r->state == BAL_ST_RUN);
+    T(r->trip == (uint8_t)BAL_TRIP_NONE);
+    T(r->run_ms >= 120000u);
     section_end();
 
     section("s6: arm refuses an angle outside the window");

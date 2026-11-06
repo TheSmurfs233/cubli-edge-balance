@@ -321,6 +321,8 @@ static alg_bal_cfg_t  s_bal_cfg;
 static app_bal_info_t s_bal;
 static uint8_t        s_bal_on;
 static uint32_t       s_bal_seq_prev;   /* attitude frame seen by the last update */
+static uint8_t        s_bal_auto = 1u;  /* whether the wheel may walk the trim  */
+static uint8_t        s_learn_done;     /* one-shot zero learn already taken    */
 
 static void bal_cfg_load(void)
 {
@@ -337,8 +339,7 @@ static void bal_cfg_load(void)
     s_bal_cfg.trim_deg = BAL_TRIM_DEG;
     s_bal_cfg.trim_clamp_deg = BAL_TRIM_MAX_DEG;
     s_bal_cfg.trim_gate_deg = BAL_TRIM_GATE_DEG;
-    s_bal_cfg.trim_adapt_k = BAL_TRIM_ADAPT_K;
-    s_bal_cfg.trim_adapt_tau_s = BAL_TRIM_ADAPT_TAU_S;
+    s_bal_cfg.trim_w_k = BAL_TRIM_W_K;
 
     /* Threshold order is a safety property: ARM must sit inside TRIP, the
      * balance ceiling must stay below the torque interface, and the stale
@@ -348,7 +349,8 @@ static void bal_cfg_load(void)
         (BAL_ARM_DPS >= BAL_TRIP_DPS) ||
         (BAL_ARM_RPM >= BAL_TRIP_RPM) ||
         (BAL_MAX_MNM >= TORQUE_MAX_MNM) ||
-        ((uint32_t)BAL_TRIP_STALE_MS > ((uint32_t)BAL_MAX_MS / 2u)))
+        ((BAL_MAX_MS > 0u) &&
+         ((uint32_t)BAL_TRIP_STALE_MS > ((uint32_t)BAL_MAX_MS / 2u))))
     {
         log_printf("WARN bal: BAL_* threshold order looks wrong, check board_cfg.h");
     }
@@ -399,7 +401,8 @@ void app_bal_update(void)
      * 2026-11-05: only while the loop is actually balancing. The trim has no
      * negative feedback when the body is held still (flat on the desk), so an
      * ungated adaptor wound it to the clamp and then shoved the cube over. */
-    if ((s_bal_seq_prev != a->seq) && (app_balance_info()->engaged != 0u) &&
+    if ((s_bal_seq_prev != a->seq) && (s_bal_auto != 0u) &&
+        (app_balance_info()->engaged != 0u) &&
         (app_balance_info()->state == BAL_ST_RUN))
     {
         s_bal_seq_prev = a->seq;
@@ -454,12 +457,30 @@ const app_bal_info_t *app_bal_info(void)
 
 float app_bal_trim_set(float deg)
 {
-    /* The algorithm layer owns the trim now (it also adapts it), so the manual
-     * command goes through the same clamp and the same state. Mirror it into
-     * the published info so a read-back right after the command is current. */
+    /* Manual override: a human just told the loop where the zero is, so stop
+     * walking it. "bal auto on" gives it back. */
     float r = alg_bal_trim_set(deg);
+
+    s_bal_auto = 0u;
     s_bal.trim_deg = r;
     return r;
+}
+
+void app_bal_trim_learn(float deg)
+{
+    /* Used by the one-shot learn at ENGAGE + BAL_LEARN_MS: it sets the trim
+     * without disarming the wheel-driven walk. */
+    s_bal.trim_deg = alg_bal_trim_set(deg);
+}
+
+void app_bal_auto_set(uint8_t on)
+{
+    s_bal_auto = (on != 0u) ? 1u : 0u;
+}
+
+uint8_t app_bal_auto_get(void)
+{
+    return s_bal_auto;
 }
 
 float app_bal_trim_get(void)
@@ -594,6 +615,7 @@ uint8_t app_balance_arm(uint8_t on)
     s_run.tau_applied_mnm = 0.0f;
     s_run_t0             = HAL_GetTick();
     s_last_frames        = imu_ctx()->stat.frames;
+    s_learn_done         = 0u;
     return 0u;
 }
 
@@ -646,6 +668,7 @@ uint8_t app_balance_start_now(void)
     s_run.run_ms  = 0u;
     s_tau_cmd     = 0.0f;
     s_held_frames = 0u;
+    s_learn_done  = 0u;
     return 0u;
 }
 
@@ -690,7 +713,7 @@ void app_balance_update(void)
         bal_trip((uint8_t)BAL_TRIP_WHEEL);
         return;
     }
-    if (s_run.run_ms > (uint32_t)BAL_MAX_MS)
+    if ((BAL_MAX_MS > 0u) && (s_run.run_ms > (uint32_t)BAL_MAX_MS))
     {
         bal_trip((uint8_t)BAL_TRIP_TIMEOUT);
         return;
@@ -742,6 +765,25 @@ void app_balance_update(void)
             return;
         }
     }
+    /* One-shot zero learn. After BAL_LEARN_MS the loop has settled onto the real
+     * balance point, so the angle it is holding IS the zero error (measured
+     * 2026-11-06: phi -2.32 deg <-> wheel 1340 rpm). Take it once and let the
+     * wheel-driven walk handle the rest; skip it when the loop already sits
+     * inside a fraction of a degree of zero. */
+    if (s_learn_done == 0u)
+    {
+        if (s_run.run_ms >= (uint32_t)BAL_LEARN_MS)
+        {
+            s_learn_done = 1u;
+            if ((fabsf(a->theta_deg) > 0.15f) && (fabsf(a->theta_deg) < BAL_TRIM_GATE_DEG))
+            {
+                app_bal_trim_learn(a->theta_deg);
+                log_printf("[BAL] zero learned %.2f deg (wheel %.0f rpm)",
+                           (double)a->theta_deg, (double)a->wheel_rpm);
+            }
+        }
+    }
+
     /* Held-cube detector. A free cube cannot refuse a torque: a large command
      * with a static body means the cube rests on something, and the wheel is the
      * only thing that will move. 28 mN.m for 0.35 s already saturates the wheel

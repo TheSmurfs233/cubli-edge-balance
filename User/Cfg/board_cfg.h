@@ -722,33 +722,25 @@ extern "C" {
  * reboot restores the value below). Bounded because a large trim is just a
  * worse zero: the usable range around the balance point is a couple of degrees. */
 #define BAL_TRIM_DEG            0.0f
-#define BAL_TRIM_MAX_DEG        2.0f
+#define BAL_TRIM_MAX_DEG        3.0f    /* must cover the zero error: the bench
+                                         * sat at -2.3 deg (docs/45 4.17) */
 
-/* Slow zero adaptation (docs/45 4.12). A constant external torque -- the USB
- * cable is 2~4 mN.m -- shows up as a constant command, and a constant command
- * is wheel speed, so the wheel reaches the 1700 rpm trip in a few seconds
- * (measured 6.1 s on 2026-11-04). Leaning the zero lets gravity carry that
- * torque instead of the wheel.
- *   trim' = -k * LP(command)   [deg/s], k in deg/s per mN.m
- * LP is a first-order filter of the law output (before feed-forward), so the
- * balancing action itself does not move the trim. Gated on |phi| and clamped:
- * a trim change while the body is still being caught would lean it over.
- * sim/t20_trim.py, 120 s, 2 mN.m cable pull: k = 0.1 keeps |phi| under 0.62 deg,
- * wheel peak 650 rpm, residual +289 rpm instead of +956 rpm with k = 0; k >= 0.3
- * falls. 0 disables the adaptation and leaves the manual trim in charge.
- *
- * Disabled for the moment (2026-11-05). The sign of trim' was derived from
- * sim/t20_trim.py, where the body can tilt; on a cube lying flat the body angle
- * is frozen, the loop cannot answer, and the adaptation winds to the clamp
- * within a second (measured: trim -2.00 deg, law +17.9 mN.m with phi = 0). That
- * proves nothing about the edge case either way, and a wrong sign there would
- * lean the cube over on the first capture, so the next on-board runs keep the
- * known-good law (the 6132 ms capture ran without adaptation) and the manual
- * "bal trim" knob, and the automatic version gets its own step with bal log
- * evidence. */
-#define BAL_TRIM_ADAPT_K        0.0f
-#define BAL_TRIM_ADAPT_TAU_S    0.5f
-#define BAL_TRIM_GATE_DEG       3.0f
+/* Slow zero adaptation, walked by the WHEEL (docs/45 4.17). Gravity pins the
+ * body at the true balance point, so in steady state
+ *     omega_ss = (kp/kw) * (trim - phi_ss)
+ * i.e. a zero error is paid for entirely in wheel speed: the bench held
+ * phi = -2.32 deg and wheel = 1340 rpm for the whole 60 s window (predicted
+ * 1328). The wheel speed is therefore the error signal:
+ *     trim -= trim_w_k * omega_rpm * dt     [deg per rpm per second]
+ * which stops by itself exactly when the wheel stops. Gated on |phi| and
+ * clamped; the walk is only allowed while the loop is engaged and balancing.
+ * sim/s6_auto_trim2.py (2.3 deg zero error, 70 s): k = 1e-4 -> 17 rpm, k = 3e-4
+ * -> 0 rpm in 17 s with the body moving less than 0.05 deg, k = 1e-3 -> 5 s but
+ * 3.11 deg of lean. 3e-4 chosen. 0 freezes the trim and leaves "bal trim" in
+ * charge. */
+#define BAL_TRIM_W_K            3.0e-4f
+#define BAL_TRIM_GATE_DEG       4.0f    /* outside this the body is still being
+                                         * captured; do not lean it further */
 
 /* Attitude frame period: the adaptation is advanced once per new 0x41 frame. */
 #define BAL_FRAME_DT_S          0.005f
@@ -772,8 +764,9 @@ extern "C" {
 #define BAL_SCALE               0.7f
 
 /* ARM window: all four must hold before the loop is allowed to push.
- * 2.5 deg leaves 1.25 deg of margin against the 3.75 deg capture of 0.7x. */
-#define BAL_ARM_DEG             2.5f
+ * 2.0 deg leaves 1.75 deg of margin against the 3.75 deg capture of 0.7x, and
+ * the operator has to place the cube inside it by hand. */
+#define BAL_ARM_DEG             2.0f
 #define BAL_ARM_DPS             30.0f   /* do not take over a fast fall     */
 #define BAL_ARM_RPM             300.0f  /* wheel should be near standstill  */
 
@@ -798,12 +791,19 @@ extern "C" {
  * budget; full scale now takes 50 ms, still fast against the 1.2 Hz loop. */
 #define BAL_SLEW_MNM_STEP       3.0f
 
-/* Automatic stop. A hand-held start needs a long window: the operator has to
- * let go, and a 3 s window expires while the hand is still on the cube (measured
- * twice: phi stayed inside 0.02 deg for the whole run, i.e. the cube never left
- * the hand). The loop still trips on tilt / rate / wheel / stale long before
- * this, so the window is only an upper bound. */
-#define BAL_MAX_MS              60000u
+/* Automatic stop. 0 = no time window: the loop runs until a TRIP or a manual
+ * stop. The window existed because a hand-held start can look like a good run
+ * (measured twice: phi stayed inside 0.02 deg, i.e. the cube never left the
+ * hand), but the engage-on-release detector plus the held detector now cover
+ * that case, and the 60 s cap was the only thing ending otherwise healthy runs
+ * (measured 2026-11-06: 60 001 ms, trip timeout, phi peak 0.86 deg, wheel
+ * 1389 rpm). Set a number only for a bounded experiment. */
+#define BAL_MAX_MS              0u
+
+/* One-shot zero learn: BAL_LEARN_MS after ENGAGE the loop has settled onto the
+ * real balance point, so the observed theta IS the zero error. Take it once and
+ * hand the rest to the wheel-driven walk above (docs/45 4.17). */
+#define BAL_LEARN_MS            1000u
 
 /* Held-cube detector. A free cube cannot refuse a torque: if the law keeps
  * asking for a large torque while the body neither tilts nor rotates, the cube

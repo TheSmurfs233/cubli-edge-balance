@@ -161,6 +161,7 @@ static void print_help(void)
     log_printf(" att [zero|stat <s>]  body pitch, rate, zero and noise window");
     log_printf(" bal [on|off|log <s>] balance law, shadow mode (never drives)");
     log_printf(" bal trim <deg> move the zero so the wheel stops winding up");
+    log_printf(" bal auto [on|off] let the wheel speed walk the zero (default on)");
     log_printf(" bal run [on|off] closed loop with interlocks -- moves the motor");
     log_printf(" imu rate <hz> [save]  set the 0x41 AHRS packet rate (10..200)");
     log_printf(" imu cfg <text> forward one ASCII config command (e.g. imu cfg #fmsg)");
@@ -715,6 +716,9 @@ static void print_bal(void)
     log_printf(" zero   = trim %s%.2f deg (max %.1f), friction ff %.2f mN.m",
                (b->trim_deg < 0.0f) ? "-" : "+", (double)fabsf(b->trim_deg),
                (double)BAL_TRIM_MAX_DEG, (double)BAL_FF_MNM);
+    log_printf(" auto   = %s, wheel walk %.1e deg per rpm per s, gate %.1f deg",
+               (app_bal_auto_get() != 0u) ? "on" : "off (manual trim)",
+               (double)BAL_TRIM_W_K, (double)BAL_TRIM_GATE_DEG);
 }
 
 /* Print one row per sample while the user rocks the cube by hand.
@@ -782,9 +786,13 @@ static void print_bal_run(void)
     log_printf(" limits = arm %.1f deg / %.0f dps / %.0f rpm, trip %.0f deg / %.0f dps / %.0f rpm",
                (double)BAL_ARM_DEG, (double)BAL_ARM_DPS, (double)BAL_ARM_RPM,
                (double)BAL_TRIP_DEG, (double)BAL_TRIP_DPS, (double)BAL_TRIP_RPM);
-    log_printf(" scale  = %.2f x nominal, ceiling %.0f mN.m, slew %.0f mN.m per frame, max %u ms",
-               (double)BAL_SCALE, (double)BAL_MAX_MNM, (double)BAL_SLEW_MNM_STEP,
-               (unsigned)BAL_MAX_MS);
+    log_printf(" scale  = %.2f x nominal, ceiling %.0f mN.m, slew %.0f mN.m per frame",
+               (double)BAL_SCALE, (double)BAL_MAX_MNM, (double)BAL_SLEW_MNM_STEP);
+    if (BAL_MAX_MS > 0u) {
+        log_printf(" max    = %u ms", (unsigned)BAL_MAX_MS);
+    } else {
+        log_printf(" max    = no limit (runs until a trip or 'bal run off')");
+    }
 }
 
 /* Arm the closed-loop. Deliberately chatty: this is the one command that can
@@ -808,13 +816,21 @@ static void cmd_bal_run_on(void)
 
     r = app_balance_arm(1u);
     if (r == 0u) {
-        log_printf("OK bal run armed, max %u ms -- hand on the power switch, cube on the soft pad",
-                   (unsigned)BAL_MAX_MS);
+        if (BAL_MAX_MS > 0u) {
+            log_printf("OK bal run armed, max %u ms -- hand on the power switch, cube on the soft pad",
+                       (unsigned)BAL_MAX_MS);
+        } else {
+            log_printf("OK bal run armed, no time limit -- hand on the power switch, cube on the soft pad");
+        }
     } else if (r == 1u) {
         log_printf("ERR bal run: no valid attitude frame");
     } else if (r == 2u) {
+        /* The arm check reads att_get()->theta_deg, so report the same number:
+         * app_bal_info()->phi_deg is only refreshed by app_bal_update(), which
+         * right after an "att zero" still holds the pre-zero value (a confusing
+         * "tilt 0.00 deg outside +-2.50" was printed from exactly this). */
         log_printf("ERR bal run: tilt %.2f deg outside +-%.1f deg arm window",
-                   (double)app_bal_info()->phi_deg, (double)BAL_ARM_DEG);
+                   (double)att_get()->theta_deg, (double)BAL_ARM_DEG);
     } else if (r == 3u) {
         log_printf("ERR bal run: tilt rate %.1f deg/s above %.0f, let it settle",
                    (double)fabsf(app_bal_info()->dphi_dps), (double)BAL_ARM_DPS);
@@ -932,11 +948,25 @@ static float   s_pll_zeta = PLL_ZETA;
             log_printf("OK bal off");
         } else if ((n >= 2u) && (strcmp(tok[1], "log") == 0)) {
             cmd_bal_log((n >= 3u) ? tok[2] : "3");
+        } else if ((n >= 2u) && (strcmp(tok[1], "auto") == 0)) {
+            if ((n >= 3u) && (strcmp(tok[2], "on") == 0)) {
+                app_bal_auto_set(1u);
+                log_printf("OK bal auto on: the wheel speed walks the zero trim");
+            } else if ((n >= 3u) && (strcmp(tok[2], "off") == 0)) {
+                app_bal_auto_set(0u);
+                log_printf("OK bal auto off: trim is frozen, use \"bal trim <deg>\"");
+            } else if (n < 3u) {
+                log_printf(" auto   = %s, usage=bal auto <on|off>",
+                           (app_bal_auto_get() != 0u) ? "on" : "off");
+            } else {
+                log_printf("ERR usage=bal auto <on|off>");
+            }
         } else if ((n >= 2u) && (strcmp(tok[1], "trim") == 0)) {
             float deg = 0.0f;
             if ((n >= 3u) && (parse_num(tok[2], &deg) != 0u)) {
                 deg = app_bal_trim_set(deg);
-                log_printf("OK bal trim %.2f deg (angle used = theta - trim)", (double)deg);
+                log_printf("OK bal trim %.2f deg (auto trim off, angle used = theta - trim)",
+                           (double)deg);
             } else if (n < 3u) {
                 log_printf(" trim   = %.2f deg (max %.1f), usage=bal trim <deg>",
                            (double)app_bal_trim_get(), (double)BAL_TRIM_MAX_DEG);
