@@ -1464,6 +1464,15 @@ static float   s_pll_zeta = PLL_ZETA;
                    (unsigned)f->count[1], (unsigned)f->count[2],
                    (unsigned)f->count[3], (unsigned)f->count[4],
                    (unsigned)f->count[5], (unsigned)f->count[6]);
+        {
+            const app_fault_info_t *l = app_last_fault();
+
+            if (l->code != 0u) {
+                log_printf(" last   = %s, value %.3f, at %u ms",
+                           name[(l->code < 7u) ? l->code : 0u],
+                           (double)l->value, (unsigned)l->uptime_ms);
+            }
+        }
         (void)i;
     }
     /* ---------------- prot (S7.6) ----------------- */

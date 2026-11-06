@@ -54,6 +54,9 @@ static volatile uint32_t s_ovr;   /* SPI RX overruns (a byte was lost) */
 static volatile uint32_t s_resyncs; /* bsp_ssi_resync() calls */
 static volatile uint32_t s_quiet_until; /* DWT tick before which the clock must stay idle */
 static volatile uint8_t  s_quiet_pend;  /* 1 = SPE is off, waiting for the silence to expire */
+static volatile uint8_t  s_resync_pend; /* 1 = park the bus as soon as the frame lands */
+
+static void ssi_park(void);   /* forward: called from poll() and resync() */
 static uint8_t  s_stuck;  /* consecutive ISR periods still busy */
 static uint8_t  s_cfg_err; /* DMA channel in code != the one CubeMX configured */
 
@@ -188,6 +191,10 @@ uint8_t bsp_ssi_poll(uint8_t frame[BSP_SSI_FRAME_LEN])
 
     s_busy = 0u;
 
+    if (s_resync_pend != 0u) {
+        ssi_park();                 /* frame is safely in: now the bus may rest */
+    }
+
     if (frame != 0) {
         frame[0] = s_rx[0];
         frame[1] = s_rx[1];
@@ -242,8 +249,24 @@ void bsp_ssi_resync(void)
         return;
     }
 
-    /* Release the slave first: the MT6701 only realigns its frame counter when
-     * it sees the clock line idle, not merely a gap between two bursts.
+    /* Cutting a frame in flight is what creates bit-level phase slips, and a
+     * bit-level slip cannot be undone by the rotation decoder (only whole-byte
+     * ones can). So when the line is busy, remember the request and park the
+     * bus right after the frame lands instead of raising CSN now.
+     * Measured 2026-11-07: resync called on every 5 bad frames turned into a
+     * loop (283 resyncs in 12 s) because each one cut another frame. */
+    if (s_busy != 0u) {
+        s_resync_pend = 1u;
+        return;
+    }
+
+    ssi_park();
+}
+
+static void ssi_park(void)
+{
+    /* Release the slave: the MT6701 only realigns its frame counter when it
+     * sees the clock line idle, not merely a gap between two bursts.
      *
      * The silence is NOT spun out here. This function is reached from the
      * 20 kHz control interrupt (via mid_enc_update), and blocking it for
@@ -264,8 +287,9 @@ void bsp_ssi_resync(void)
     SPI1->CR1 &= ~SPI_CR1_SPE;
     ssi_flush_rx();
 
-    s_busy   = 0u;
-    s_stuck  = 0u;
+    s_busy        = 0u;
+    s_stuck       = 0u;
+    s_resync_pend = 0u;
     s_resyncs++;
 }
 

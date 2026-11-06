@@ -281,6 +281,9 @@ typedef struct {
 /* Raise a fault: bridge off, speed loop released, references cleared. */
 void app_fault_raise(uint8_t code, float value);
 const app_fault_info_t *app_fault_info(void);
+
+/* The most recent fault, still valid after "stop" cleared the live one. */
+const app_fault_info_t *app_last_fault(void);
 const app_prot_t       *app_prot_info(void);
 
 typedef struct {

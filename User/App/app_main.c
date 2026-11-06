@@ -100,6 +100,7 @@ static uint8_t        s_foc_trip_cnt;
 
 /* S7.6 protections. */
 static app_prot_t       s_prot;
+static app_fault_info_t s_last_fault;
 static app_fault_info_t s_fault;
 static uint32_t s_prot_start_ms;   /* start of the grace window        */
 static uint32_t s_prot_ov_ms;      /* overspeed debounce               */
@@ -1567,6 +1568,10 @@ void app_fault_raise(uint8_t code, float value)
     s_fault.code      = code;
     s_fault.value     = value;
     s_fault.uptime_ms = HAL_GetTick();
+
+    /* "stop" clears s_fault, which used to erase the only evidence of what
+     * went wrong. Keep a copy that survives until the next fault. */
+    s_last_fault = s_fault;
     if (code < (uint8_t)APP_FAULT_COUNT) {
         s_fault.count[code]++;
     }
@@ -1595,6 +1600,11 @@ void app_fault_raise(uint8_t code, float value)
         break;
     }
     log_printf(" type stop to reset");
+}
+
+const app_fault_info_t *app_last_fault(void)
+{
+    return &s_last_fault;
 }
 
 const app_fault_info_t *app_fault_info(void)
