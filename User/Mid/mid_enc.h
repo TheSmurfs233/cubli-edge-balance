@@ -90,9 +90,14 @@ uint8_t mid_enc_crc6(uint32_t bits18);
  * ENC_BAD_RUN_RESYNC triggers bsp_ssi_resync() (18#L-16). */
 uint8_t mid_enc_bad_run(void);
 
-/* Raw three bytes of the last collected frame, for the "ssi" command: a frame
+/* Raw four bytes of the last collected frame, for the "ssi" command: a frame
  * that slipped by one byte is obvious in the dump. */
-void mid_enc_last_frame(uint8_t out[3]);
+void mid_enc_last_frame(uint8_t out[4]);
+
+/* Bit offset (0..7) of the window the last frame was decoded from. 0 is the
+ * normal phase; anything else means the reader sits "n" bits late and the
+ * search recovered the frame anyway (18#L-16). */
+uint8_t mid_enc_win(void);
 
 #ifdef __cplusplus
 }

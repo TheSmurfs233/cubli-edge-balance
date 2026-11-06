@@ -960,7 +960,7 @@ static void test_adc(void)
 /* ================================================================== */
 /* Encoder (Mid + Bsp fake)                                            */
 /* ================================================================== */
-extern uint8_t fake_ssi_frame[3];
+extern uint8_t fake_ssi_frame[4];
 extern uint8_t fake_ssi_fail;
 extern uint8_t fake_ssi_busy;
 extern uint32_t fake_ssi_resyncs;
@@ -974,6 +974,22 @@ static void enc_build_frame(uint16_t d, uint8_t mg)
     fake_ssi_frame[0] = (uint8_t)((w >> 16) & 0xFFu);
     fake_ssi_frame[1] = (uint8_t)((w >> 8) & 0xFFu);
     fake_ssi_frame[2] = (uint8_t)(w & 0xFFu);
+    fake_ssi_frame[3] = 0u;                  /* one extra byte of slack */
+}
+
+/* Lay a valid frame down so that it starts "off" bits after the first bit the
+ * reader clocks in: emulates the slipped phase seen on hardware. */
+static void enc_build_frame_at(uint16_t d, uint8_t mg, uint8_t off)
+{
+    uint32_t bits = (((uint32_t)d & 0x3FFFu) << 4) | ((uint32_t)mg & 0x0Fu);
+    uint8_t  crc  = mid_enc_crc6(bits);
+    uint32_t w    = (bits << 6) | (uint32_t)(crc & 0x3Fu);
+    uint32_t w32  = (uint32_t)w << (8u - (uint32_t)off);
+
+    fake_ssi_frame[0] = (uint8_t)((w32 >> 24) & 0xFFu);
+    fake_ssi_frame[1] = (uint8_t)((w32 >> 16) & 0xFFu);
+    fake_ssi_frame[2] = (uint8_t)((w32 >> 8) & 0xFFu);
+    fake_ssi_frame[3] = (uint8_t)(w32 & 0xFFu);
 }
 
 static void test_enc(void)
@@ -1070,7 +1086,7 @@ static void test_enc(void)
 
     section("enc: the last frame is kept for the ssi command");
     {
-        uint8_t f[3];
+        uint8_t f[4];
 
         enc_build_frame(4096u, 0u);
         mid_enc_update();
@@ -1078,6 +1094,51 @@ static void test_enc(void)
         T(f[0] == fake_ssi_frame[0]);
         T(f[1] == fake_ssi_frame[1]);
         T(f[2] == fake_ssi_frame[2]);
+        T(f[3] == fake_ssi_frame[3]);
+        T(mid_enc_win() == 0u);
+    }
+    section_end();
+
+    section("enc: a frame read one byte late is recovered, not dropped");
+    {
+        uint32_t before;
+
+        enc_build_frame(3000u, 0u);
+        mid_enc_update();                       /* good frame at phase 0 */
+        T(mid_enc_win() == 0u);
+        T(mid_enc_info()->raw == 3000u);
+
+        /* The reader slipped by one byte: the real frame now sits at window
+         * +8. This is the state that used to fail CRC forever (docs/00 #052,
+         * 100 % CRC error on hardware until the wheel was turned by hand). */
+        before = mid_enc_info()->crc_errs;
+        enc_build_frame_at(3000u, 0u, 8u);
+        mid_enc_update();
+        T(mid_enc_info()->crc_errs == before);
+        T(mid_enc_info()->crc_ok == 1u);
+        T(mid_enc_info()->raw == 3000u);        /* angle survives the slip */
+        T(mid_enc_win() == 8u);                 /* frame sat 8 bits late */
+    }
+    section_end();
+
+    section("enc: a bogus window must not move the angle");
+    {
+        float    mech_before;
+        uint32_t errs_before;
+
+        enc_build_frame(3000u, 0u);
+        mid_enc_update();
+        mech_before = mid_enc_info()->mech_deg;
+        errs_before = mid_enc_info()->crc_errs;
+
+        /* A 12000-LSB frame starting 4 bits late: of the nine windows only
+         * the shifted one passes CRC (checked in both directions), so the
+         * plausibility gate is the only thing that can refuse it. */
+        enc_build_frame_at(12000u, 0u, 4u);
+        mid_enc_update();
+        T(mid_enc_info()->crc_errs == errs_before + 1u);
+        T(mid_enc_info()->crc_ok == 0u);
+        T(fabsf(mid_enc_info()->mech_deg - mech_before) < 0.01f);
     }
     section_end();
 
@@ -1125,6 +1186,7 @@ static void test_enc(void)
             fake_ssi_frame[0] = raw[i][0];
             fake_ssi_frame[1] = raw[i][1];
             fake_ssi_frame[2] = raw[i][2];
+            fake_ssi_frame[3] = 0u;
             mid_enc_update();
             if (mid_enc_info()->crc_ok == 0u) {
                 bad++;

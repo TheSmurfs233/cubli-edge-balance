@@ -2004,11 +2004,13 @@ static float   s_pll_zeta = PLL_ZETA;
          * that is rotated by one byte (or by 16 bits) is obvious in the dump,
          * while white noise is not. 18#L-16. */
         const mid_enc_t *e = mid_enc_info();
-        uint8_t f[3];
+        uint8_t f[4];
 
         mid_enc_last_frame(f);
         log_printf("---- ssi (MT6701 frame) ----");
-        log_printf(" bytes = %02x %02x %02x", (unsigned)f[0], (unsigned)f[1], (unsigned)f[2]);
+        log_printf(" bytes = %02x %02x %02x %02x (window +%u bit)",
+                   (unsigned)f[0], (unsigned)f[1], (unsigned)f[2], (unsigned)f[3],
+                   (unsigned)mid_enc_win());
         log_printf(" raw   = %u, mg %u, %s",
                    (unsigned)e->raw, (unsigned)e->mg,
                    (e->crc_ok != 0u) ? "crc ok" : "crc BAD");
@@ -2062,7 +2064,7 @@ static float   s_pll_zeta = PLL_ZETA;
                 log_printf("ERR enc dir");
             }
         } else if ((n >= 2u) && (strcmp(tok[1], "bench") == 0)) {
-            uint8_t  f[3];
+            uint8_t  f[BSP_SSI_FRAME_LEN];
             uint32_t k;
             uint32_t t0;
             uint32_t cyc;
@@ -2085,11 +2087,12 @@ static float   s_pll_zeta = PLL_ZETA;
             uint8_t k;
 
             for (k = 0u; k < 5u; k++) {
-                uint8_t f[3];
+                uint8_t f[BSP_SSI_FRAME_LEN];
 
                 if (bsp_ssi_read(f) == 0u) {
-                    log_printf(" enc raw %02x %02x %02x",
-                               (unsigned)f[0], (unsigned)f[1], (unsigned)f[2]);
+                    log_printf(" enc raw %02x %02x %02x %02x",
+                               (unsigned)f[0], (unsigned)f[1], (unsigned)f[2],
+                               (unsigned)f[3]);
                 } else {
                     log_printf(" enc raw ERR");
                 }

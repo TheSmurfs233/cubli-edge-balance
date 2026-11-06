@@ -47,12 +47,19 @@ static mid_enc_t s_enc;
  * encoder died" so the former can fall back instead of faulting. */
 static uint8_t   s_raw_seen_ok;
 static uint8_t   s_bad_run;      /* consecutive CRC failures */
-static uint8_t   s_last[3];      /* raw bytes of the last collected frame */
+static uint8_t   s_last[4];      /* raw bytes of the last collected frame */
+static uint8_t   s_win;          /* bit offset the last frame decoded at   */
+static uint32_t  s_t_enc;        /* timestamp of the last accepted frame   */
 
 /* Consecutive CRC failures that switch from abort() to resync(). One or two bad
  * frames are noise; a run means the reader is misaligned and only a long clock
  * pause brings the MT6701 back (18#L-16, docs/00 #050). */
 #define ENC_BAD_RUN_RESYNC 5u
+
+/* How many raw LSB (16384 per turn) the wheel can cover in one millisecond at
+ * the mechanical ceiling of this machine, ~2000 rpm = 50.5 LSB/ms. Used to
+ * reject frames that a bit-shifted search "recovered" only by CRC luck. */
+#define ENC_LSB_PER_MS     55u
 static float    s_zero_rad;   /* zero_deg converted once */
 
 /* Speed estimator state (see ENC_SPD_WINDOW_MS) */
@@ -123,13 +130,20 @@ uint8_t mid_enc_bad_run(void)
     return s_bad_run;
 }
 
-void mid_enc_last_frame(uint8_t out[3])
+void mid_enc_last_frame(uint8_t out[4])
 {
     if (out != 0) {
         out[0] = s_last[0];
         out[1] = s_last[1];
         out[2] = s_last[2];
+        out[3] = s_last[3];
     }
+}
+
+
+uint8_t mid_enc_win(void)
+{
+    return s_win;
 }
 
 /* ------------------------------------------------------------------ */
@@ -210,14 +224,59 @@ void mid_enc_init(void)
     s_win_rpm = 0.0f;
 }
 
+/* Pick the 24-bit window out of the four bytes that passes CRC6.
+ *
+ * The MT6701 shifts out a fixed 24-bit word and has no frame sync, so a
+ * transfer cut short leaves the reader one byte (or a few bits) off and then
+ * every frame fails CRC forever: docs/00 #052 measured 100 % CRC error until
+ * the wheel was turned by hand. Reading one byte more makes the real frame one
+ * of nine windows, so a CRC pass per window recovers the phase instead of
+ * waiting for luck (18#L-16).
+ *
+ * The gate matters as much as the search: with nine windows a CRC6 false hit
+ * is not rare, and taking one would move the angle to a random value. Phase 0
+ * is the documented contract (CRC alone), but a window found by searching has
+ * to be plausible too - at 20 kHz the wheel cannot move far between frames.
+ * */
+static uint8_t enc_align(uint32_t w32, uint32_t lim, uint32_t *w_out)
+{
+    uint8_t k;
+    uint8_t off;
+
+    for (k = 0u; k < 9u; k++) {
+        uint32_t win;
+
+        off = (uint8_t)((s_win + k) % 9u);
+        win = (w32 >> (8u - off)) & 0xFFFFFFu;   /* off <= 8, shift 8..0 */
+        if (mid_enc_crc6(win >> 6) != (win & 0x3Fu)) {
+            continue;
+        }
+        if ((off != 0u) && (s_enc.valid != 0u)) {
+            int32_t jd = (int32_t)((win >> 10) & 0x3FFFu) - (int32_t)s_enc.raw;
+
+            if (jd >  8192) { jd -= 16384; }
+            if (jd < -8192) { jd += 16384; }
+            if ((uint32_t)((jd < 0) ? -jd : jd) > lim) {
+                continue;                        /* CRC luck, not the frame */
+            }
+        }
+        s_win  = off;
+        *w_out = win;
+        return 1u;
+    }
+    return 0u;
+}
+
+
 void mid_enc_update(void)
 {
-    uint8_t  f[3];
+    uint8_t  f[BSP_SSI_FRAME_LEN];
+    uint32_t w32;
     uint32_t w;
     uint16_t d;
     uint8_t  mg;
-    uint8_t  crc_rx;
     uint8_t  rc;
+    uint32_t lim;
     float    mech;
     float    elec;
 
@@ -244,30 +303,24 @@ void mid_enc_update(void)
     s_last[0] = f[0];
     s_last[1] = f[1];
     s_last[2] = f[2];
+    s_last[3] = f[3];
 
-    w      = ((uint32_t)f[0] << 16) | ((uint32_t)f[1] << 8) | (uint32_t)f[2];
-    d      = (uint16_t)((w >> 10) & 0x3FFFu);
-    mg     = (uint8_t)((w >> 6) & 0x0Fu);
-    crc_rx = (uint8_t)(w & 0x3Fu);
-
-    s_enc.raw    = d;
-    s_enc.mg     = mg;
-    s_enc.crc_ok = (mid_enc_crc6(w >> 6) == crc_rx) ? 1u : 0u;
-    if ((d != 0u) && (s_enc.crc_ok != 0u)) {
-        s_raw_seen_ok = 1u;      /* a real encoder is answering */
-    }
-    if (s_enc.crc_ok == 0u) {
-        s_enc.crc_errs++;
-    }
-
-    /* A corrupt frame must never reach the control loop: keep the previous
-     * angle (one period old, 0.09 deg at 5 Hz) instead of a wrong one. */
+    /* A lost byte must never reach the control loop: keep the previous angle
+     * (one period old, 0.09 deg at 5 Hz) instead of a wrong one. */
     if (rc == 2u) {
         s_enc.ovr++;
         bsp_ssi_abort();        /* a lost byte shifts every later frame */
+        bsp_ssi_start();
         return;
     }
-    if (s_enc.crc_ok == 0u) {
+
+    /* 32 bits in, 24 bits out: the frame can start at any bit offset, so let
+     * the decoder find it instead of trusting the first three bytes. */
+    w32 = ((uint32_t)f[0] << 24) | ((uint32_t)f[1] << 16) |
+          ((uint32_t)f[2] << 8)  |  (uint32_t)f[3];
+
+    lim = 100u + (uint32_t)(((bsp_prof_now() - s_t_enc) / 1000u) * ENC_LSB_PER_MS);
+    if (enc_align(w32, lim, &w) == 0u) {
         /* Do not just skip the frame: a corrupt read usually means the reader
          * slipped by a byte, and without a resync every frame after it is
          * misaligned too (18#L-16). Aborting flushes the receive path so the
@@ -280,15 +333,31 @@ void mid_enc_update(void)
          * (measured 2026-11-07: 100 % CRC error for minutes, cleared only by
          * turning the wheel half a revolution). A run of failures is that
          * state, so pause the clock instead of aborting yet again. */
+        s_enc.crc_ok = 0u;
+        s_enc.crc_errs++;
+        s_enc.raw = (uint16_t)((w32 >> 18) & 0x3FFFu);
+        s_enc.mg  = (uint8_t)((w32 >> 14) & 0x0Fu);
         if (++s_bad_run >= ENC_BAD_RUN_RESYNC) {
             s_bad_run = 0u;
             bsp_ssi_resync();
         } else {
             bsp_ssi_abort();
         }
+        bsp_ssi_start();
         return;
     }
     s_bad_run = 0u;
+
+    d  = (uint16_t)((w >> 10) & 0x3FFFu);
+    mg = (uint8_t)((w >> 6) & 0x0Fu);
+
+    s_t_enc = bsp_prof_now();
+    s_enc.raw    = d;
+    s_enc.mg     = mg;
+    s_enc.crc_ok = 1u;
+    if (d != 0u) {
+        s_raw_seen_ok = 1u;      /* a real encoder is answering */
+    }
 
     /* Angle: raw -> mechanical degrees, then remove the zero reference. */
     mech = (float)d * ENC_RAD_PER_LSB;                 /* 0 .. 2pi */
@@ -392,6 +461,10 @@ void mid_enc_update(void)
 
         s_have_prev = 1u;
     }
+
+    /* Arm the next transfer now: the bridge is a 20 kHz task and a poll that
+     * only re-arms on "not ready" would read every other frame (10 kHz). */
+    bsp_ssi_start();
 
     s_enc.valid = 1u;
 }

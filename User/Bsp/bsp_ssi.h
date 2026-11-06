@@ -25,17 +25,24 @@ extern "C" {
 
 #include <stdint.h>
 
+/* Four bytes, not three: the MT6701 is a plain shift register with no frame
+ * sync, so after any aborted transfer the reader can sit one byte off and
+ * every frame fails CRC (18#L-16, docs/00 #052). Reading 32 bits lets the
+ * decoder search all nine 24-bit windows and lock on to the real frame. */
+#define BSP_SSI_FRAME_LEN   4u
+
 void bsp_ssi_init(void);
 
-/* Arm one 24-bit transfer: CSN goes low, the RX DMA is armed and three dummy
- * bytes are queued. Returns immediately (~0.3us). A second call while a
- * transfer is still in flight is ignored. */
+/* Arm one 32-bit transfer: CSN goes low, the RX DMA is armed and four dummy
+ * bytes are queued. Returns immediately after the last byte is accepted
+ * (~2.3us of TXE waiting, 3.0us of shifting in the background). A second call
+ * while a transfer is still in flight is ignored. */
 void bsp_ssi_start(void);
 
 /* Non-blocking: returns 1 and copies the frame once the transfer finished,
  * 0 while it is still in flight. */
 /* 0 = not ready, 1 = frame ready, 2 = ready but the SPI lost a byte (OVR) */
-uint8_t bsp_ssi_poll(uint8_t frame[3]);
+uint8_t bsp_ssi_poll(uint8_t frame[BSP_SSI_FRAME_LEN]);
 
 /* Cumulative SPI RX overruns (one byte overwritten before the DMA read it). */
 uint32_t bsp_ssi_ovr_count(void);

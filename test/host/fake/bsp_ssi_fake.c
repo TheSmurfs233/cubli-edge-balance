@@ -11,7 +11,7 @@
 
 #include "bsp_ssi.h"
 
-uint8_t  fake_ssi_frame[3];
+uint8_t  fake_ssi_frame[4];
 uint8_t  fake_ssi_fail;
 uint8_t  fake_ssi_busy;
 uint32_t fake_ssi_reads;
@@ -27,7 +27,7 @@ void bsp_ssi_start(void)
     /* nothing to arm on the host */
 }
 
-uint8_t bsp_ssi_poll(uint8_t frame[3])
+uint8_t bsp_ssi_poll(uint8_t frame[BSP_SSI_FRAME_LEN])
 {
     if (fake_ssi_fail != 0u) {
         return 0u;                    /* simulate "not ready yet" */
@@ -38,15 +38,17 @@ uint8_t bsp_ssi_poll(uint8_t frame[3])
     frame[0] = fake_ssi_frame[0];
     frame[1] = fake_ssi_frame[1];
     frame[2] = fake_ssi_frame[2];
+    frame[3] = fake_ssi_frame[3];
     return 1u;
 }
 
-uint8_t bsp_ssi_read(uint8_t frame[3])
+uint8_t bsp_ssi_read(uint8_t frame[BSP_SSI_FRAME_LEN])
 {
     if (fake_ssi_fail != 0u) {
         frame[0] = 0u;
         frame[1] = 0u;
         frame[2] = 0u;
+        frame[3] = 0u;
         return 1u;
     }
     return (bsp_ssi_poll(frame) != 0u) ? 0u : 1u;

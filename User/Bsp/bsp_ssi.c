@@ -21,6 +21,8 @@
 #include "bsp_ssi.h"
 #include "main.h"
 #include "stm32g4xx_hal.h"
+#include "board_cfg.h"
+#include "bsp_prof.h"
 
 extern SPI_HandleTypeDef hspi1;
 
@@ -34,11 +36,14 @@ extern SPI_HandleTypeDef hspi1;
  * 20 kHz ISR for over a millisecond if the SPI ever stalled. */
 #define SSI_SPIN_LIMIT    128u
 #define SSI_BUSY_LIMIT    4u      /* frames in flight before we force a reset */
-/* bsp_ssi_resync() parks the bus this many NOP iterations (~4 cycles each at
- * 170 MHz, so 11000 is about 260us) before it restarts the shift engine. */
-#define SSI_RESYNC_QUIET_LOOPS 11000u
+/* bsp_ssi_resync() holds the clock line idle this long before it restarts the
+ * shift engine. Measured on the target: a NOP loop of the same nominal length
+ * was optimised into nothing by the compiler, so the pause never happened and
+ * the reader stayed misaligned (resync ran 2586 times in 30 s without one good
+ * frame afterwards). Count DWT cycles instead. */
+#define SSI_RESYNC_QUIET_US   300u
 
-static volatile uint8_t s_rx[3];
+static volatile uint8_t s_rx[BSP_SSI_FRAME_LEN];
 static volatile uint8_t s_busy;
 static volatile uint32_t s_ovr;   /* SPI RX overruns (a byte was lost) */
 static volatile uint32_t s_resyncs; /* bsp_ssi_resync() calls */
@@ -48,7 +53,7 @@ static uint8_t  s_cfg_err; /* DMA channel in code != the one CubeMX configured *
 
 /* Drop whatever is left in the SPI receive path.
  *
- * A frame is exactly three bytes and the DMA takes exactly three, so any byte
+ * A frame is exactly four bytes and the DMA takes exactly four, so any byte
  * sitting in RXFIFO/DR when a frame starts means an earlier transfer was
  * aborted while it was still shifting. Those stray bytes are picked up by the
  * next frame's DMA and every frame after it is then read two bytes late: the
@@ -124,7 +129,7 @@ void bsp_ssi_start(void)
 
     SSI_DMA->CCR   &= ~DMA_CCR_EN;
     ssi_flush_rx();                 /* start every frame on a byte boundary */
-    SSI_DMA->CNDTR  = 3u;
+    SSI_DMA->CNDTR  = BSP_SSI_FRAME_LEN;
     DMA1->IFCR      = SSI_IFCR_CGIF;
     SSI_DMA->CCR   |= DMA_CCR_EN;
     SPI1->CR2      |= SPI_CR2_RXDMAEN;
@@ -132,9 +137,10 @@ void bsp_ssi_start(void)
     /* CSN low (BSRR reset) */
     CSN_GPIO_Port->BSRR = (uint32_t)CSN_Pin << 16;
 
-    /* Three dummy bytes generate the 24 clocks: this is the only CPU time the
-     * transfer costs, the DMA collects the incoming bytes meanwhile. */
-    for (i = 0u; i < 3u; i++) {
+    /* Four dummy bytes generate the 32 clocks: 0.75us more shifting than a
+     * 24-bit read, and it buys the one-byte tolerance the decoder needs. The
+     * DMA collects the incoming bytes meanwhile. */
+    for (i = 0u; i < BSP_SSI_FRAME_LEN; i++) {
         spin = 0u;
         while (((SPI1->SR & SPI_SR_TXE) == 0u) && (spin < SSI_SPIN_LIMIT)) {
             spin++;
@@ -145,7 +151,7 @@ void bsp_ssi_start(void)
     s_busy = 1u;
 }
 
-uint8_t bsp_ssi_poll(uint8_t frame[3])
+uint8_t bsp_ssi_poll(uint8_t frame[BSP_SSI_FRAME_LEN])
 {
     if (s_busy == 0u) {
         return 0u;
@@ -166,6 +172,7 @@ uint8_t bsp_ssi_poll(uint8_t frame[3])
         frame[0] = s_rx[0];
         frame[1] = s_rx[1];
         frame[2] = s_rx[2];
+        frame[3] = s_rx[3];
     }
 
     /* OVR means a received byte was overwritten before the DMA took it: the
@@ -207,10 +214,21 @@ void bsp_ssi_abort(void)
     s_stuck = 0u;
 }
 
+/* Busy-wait for a fixed time. The guard keeps a stalled DWT (CYCCNT not
+ * running) from hanging the control loop. */
+static void ssi_quiet_us(uint32_t us)
+{
+    uint32_t t0    = bsp_prof_now();
+    uint32_t want  = us * PHASE_CYC_PER_US;
+    uint32_t guard = 0u;
+
+    while (((uint32_t)(bsp_prof_now() - t0) < want) && (guard < (4u * SYS_CORE_CLK_HZ / 1000u))) {
+        guard++;
+    }
+}
+
 void bsp_ssi_resync(void)
 {
-    uint32_t i;
-
     if (s_cfg_err != 0u) {
         return;
     }
@@ -221,9 +239,7 @@ void bsp_ssi_resync(void)
     SPI1->CR2   &= ~SPI_CR2_RXDMAEN;
     SSI_DMA->CCR &= ~DMA_CCR_EN;
 
-    for (i = 0u; i < SSI_RESYNC_QUIET_LOOPS; i++) {
-        __NOP();
-    }
+    ssi_quiet_us(SSI_RESYNC_QUIET_US);
 
     /* A half-shifted frame also leaves the SPI shift register mid-byte. Toggling
      * SPE throws that state away; the second flush clears the RXFIFO/OVR that
@@ -243,7 +259,7 @@ uint32_t bsp_ssi_resync_count(void)
     return s_resyncs;
 }
 
-uint8_t bsp_ssi_read(uint8_t frame[3])
+uint8_t bsp_ssi_read(uint8_t frame[BSP_SSI_FRAME_LEN])
 {
     uint32_t spin = 0u;
 
