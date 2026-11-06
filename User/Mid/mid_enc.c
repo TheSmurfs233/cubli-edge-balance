@@ -47,6 +47,7 @@ static mid_enc_t s_enc;
  * encoder died" so the former can fall back instead of faulting. */
 static uint8_t   s_raw_seen_ok;
 static uint8_t   s_bad_run;      /* consecutive CRC failures */
+static uint8_t   s_late_run;     /* calls in a row with a frame in flight */
 static uint8_t   s_last[4];      /* raw bytes of the last collected frame */
 static uint8_t   s_win;          /* bit offset the last frame decoded at   */
 static uint32_t  s_t_enc;        /* timestamp of the last accepted frame   */
@@ -55,6 +56,12 @@ static uint32_t  s_t_enc;        /* timestamp of the last accepted frame   */
  * frames are noise; a run means the reader is misaligned and only a long clock
  * pause brings the MT6701 back (18#L-16, docs/00 #050). */
 #define ENC_BAD_RUN_RESYNC 5u
+/* A frame still in flight after this many control calls is not slow, it is
+ * wedged: a DMA request lost to an abort leaves CNDTR mid-count and TCIF never
+ * fires. Measured 2026-11-07: s_busy stayed set until the liveness guard
+ * faulted 5 ms later, because the busy path returned without ever reaching
+ * the recovery in bsp_ssi_start(). */
+#define ENC_LATE_RESYNC    20u
 
 /* How many raw LSB (16384 per turn) the wheel can cover in one millisecond at
  * the mechanical ceiling of this machine, ~2000 rpm = 50.5 LSB/ms. Used to
@@ -124,6 +131,11 @@ uint8_t mid_enc_crc6(uint32_t bits18)
     return crc;
 }
 
+
+uint8_t mid_enc_late_run(void)
+{
+    return s_late_run;
+}
 
 uint8_t mid_enc_bad_run(void)
 {
@@ -330,12 +342,17 @@ void mid_enc_update(void)
              * that aborted the frame mid-shift, which is what left the MT6701
              * stuck at bit 8 (docs/00 #052, #053). Just wait for the DMA. */
             s_enc.late++;
+            if (++s_late_run >= ENC_LATE_RESYNC) {
+                s_late_run = 0u;
+                bsp_ssi_force_resync();     /* wedged, not slow */
+            }
             return;
         }
         bsp_ssi_start();
         return;
     }
 
+    s_late_run = 0u;
     s_enc.frames++;
     s_last[0] = f[0];
     s_last[1] = f[1];

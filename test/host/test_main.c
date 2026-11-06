@@ -964,6 +964,7 @@ extern uint8_t fake_ssi_frame[4];
 extern uint8_t fake_ssi_fail;
 extern uint8_t fake_ssi_busy;
 extern uint32_t fake_ssi_resyncs;
+extern uint8_t  fake_ssi_quiet;
 
 static void enc_build_frame(uint16_t d, uint8_t mg)
 {
@@ -1228,6 +1229,35 @@ static void test_enc(void)
         fake_ssi_fail = 0u;
         fake_ssi_busy = 0u;
         mid_enc_update();          /* recover so later tests see fresh data */
+    }
+    section_end();
+
+    section("enc: a wedged frame is parked, not waited on forever");
+    {
+        uint32_t resyncs = fake_ssi_resyncs;
+        uint8_t  k;
+
+        /* Nothing completes: a DMA request lost to an abort leaves CNDTR
+         * mid-count, so TCIF never fires and s_busy stays 1 forever. Waiting
+         * cannot fix that -- on hardware the liveness guard faulted 5 ms later
+         * with "encoder stuck" (docs/00 #057). After ENC_LATE_RESYNC calls the
+         * bus must be parked so the slave sees a real clock silence. */
+        fake_ssi_fail = 1u;
+        fake_ssi_busy = 1u;
+        for (k = 0u; k < 19u; k++) {
+            mid_enc_update();
+        }
+        T(fake_ssi_resyncs == resyncs);         /* just counted as late */
+        T(mid_enc_late_run() == 19u);
+        mid_enc_update();                       /* the 20th call parks the bus */
+        T(fake_ssi_resyncs == resyncs + 1u);
+        T(mid_enc_late_run() == 0u);
+
+        fake_ssi_fail  = 0u;
+        fake_ssi_quiet = 0u;
+        enc_build_frame(2048u, 0u);
+        mid_enc_update();                       /* healthy again */
+        T(mid_enc_info()->crc_ok == 1u);
     }
     section_end();
 

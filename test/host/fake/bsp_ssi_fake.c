@@ -16,6 +16,7 @@ uint8_t  fake_ssi_fail;
 uint8_t  fake_ssi_busy;
 uint32_t fake_ssi_reads;
 uint32_t fake_ssi_resyncs;
+uint8_t  fake_ssi_quiet;
 
 void bsp_ssi_init(void)
 {
@@ -73,6 +74,18 @@ void bsp_ssi_resync(void)
 {
     fake_ssi_resyncs++;
     fake_ssi_busy = 0u;
+}
+
+void bsp_ssi_force_resync(void)
+{
+    fake_ssi_resyncs++;
+    fake_ssi_quiet = 1u;        /* host mirror of the forced silence */
+    fake_ssi_busy  = 0u;
+}
+
+uint8_t bsp_ssi_quiet(void)
+{
+    return fake_ssi_quiet;
 }
 
 uint32_t bsp_ssi_resync_count(void)

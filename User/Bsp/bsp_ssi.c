@@ -35,7 +35,7 @@ extern SPI_HandleTypeDef hspi1;
  * iterations is still under 1 us. The old 20000 could have blocked the
  * 20 kHz ISR for over a millisecond if the SPI ever stalled. */
 #define SSI_SPIN_LIMIT    128u
-#define SSI_BUSY_LIMIT    4u      /* frames in flight before we force a reset */
+#define SSI_BUSY_LIMIT    20u     /* starts skipped before the frame counts as wedged */
 /* bsp_ssi_resync() holds the clock line idle this long before it restarts the
  * shift engine. Measured on the target: a NOP loop of the same nominal length
  * was optimised into nothing by the compiler, so the pause never happened and
@@ -143,8 +143,10 @@ void bsp_ssi_start(void)
             /* Do not abort here: raising CSN mid-frame leaves the MT6701
              * counting inside the frame, and that bit-level slip is exactly
              * what the rotation decoder cannot undo (docs/00 #055, #057).
-             * Park the bus and give it a clean silence instead. */
-            bsp_ssi_resync();
+             * Park the bus and give it a clean silence instead. This is the
+             * last resort, so it must not defer: a transfer that never sets
+             * TCIF would defer forever. */
+            bsp_ssi_force_resync();
         }
         return;
     }
@@ -296,6 +298,19 @@ static void ssi_park(void)
 uint32_t bsp_ssi_resync_count(void)
 {
     return s_resyncs;
+}
+
+void bsp_ssi_force_resync(void)
+{
+    if (s_cfg_err != 0u) {
+        return;
+    }
+    ssi_park();                 /* parks, silences and re-counts s_resyncs */
+}
+
+uint8_t bsp_ssi_quiet(void)
+{
+    return s_quiet_pend;
 }
 
 uint8_t bsp_ssi_read(uint8_t frame[BSP_SSI_FRAME_LEN])

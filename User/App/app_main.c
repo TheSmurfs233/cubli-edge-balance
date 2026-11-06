@@ -1981,7 +1981,9 @@ static void task_foc(uint32_t t_pick)
      * after start (measured: false encoder fault at 1 ms). ---- */
     if ((s_if.run == 0u) && (s_sfoc == 0u) &&
         (mid_enc_enabled() != 0u)) {
-        if (e->frames != s_prot_bad_seen) {
+        if ((e->frames != s_prot_bad_seen) || (bsp_ssi_quiet() != 0u)) {
+            /* A resync parks the bus for 2.5 ms on purpose: 50 control
+             * frames at 20 kHz of intended silence is not a stalled encoder. */
             s_prot_bad_seen = e->frames;
             s_prot_enc_cnt  = 0u;
         } else if (s_prot_enc_cnt < 0xFFFFu) {

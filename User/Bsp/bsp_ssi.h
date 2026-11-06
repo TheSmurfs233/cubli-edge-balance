@@ -63,6 +63,24 @@ void bsp_ssi_abort(void);
  * middle of the previous one (18#L-16, docs/00 #050). Blocking, ~260us. */
 void bsp_ssi_resync(void);
 
+/* Park the bus right now, even if a frame is in flight. Last resort for a
+ * transfer that never completes: waiting cannot fix that, and the bit-level
+ * slip it causes is recoverable once the slave sees a real clock silence. */
+void bsp_ssi_force_resync(void);
+
+/* 1 while the bus is inside its forced silence after a resync. Callers that
+ * watch for "no new frame" must not treat that window as a stall. */
+uint8_t bsp_ssi_quiet(void);
+
+/* Park the bus right now, even if a frame is in flight. Last resort for a
+ * transfer that never completes: waiting cannot fix that, and the bit-level
+ * slip it causes is recoverable once the slave sees a real clock silence. */
+void bsp_ssi_force_resync(void);
+
+/* 1 while the bus is inside its forced silence after a resync. Callers that
+ * watch for "no new frame" must not treat that window as a stall. */
+uint8_t bsp_ssi_quiet(void);
+
 /* How many times bsp_ssi_resync() ran since power on. */
 uint32_t bsp_ssi_resync_count(void);
 

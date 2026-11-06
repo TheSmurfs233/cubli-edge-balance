@@ -90,6 +90,9 @@ uint8_t mid_enc_crc6(uint32_t bits18);
  * ENC_BAD_RUN_RESYNC triggers bsp_ssi_resync() (18#L-16). */
 uint8_t mid_enc_bad_run(void);
 
+/* Control calls in a row that found a frame still in flight (0 = healthy). */
+uint8_t mid_enc_late_run(void);
+
 /* Raw four bytes of the last collected frame, for the "ssi" command: a frame
  * that slipped by one byte is obvious in the dump. */
 void mid_enc_last_frame(uint8_t out[4]);
