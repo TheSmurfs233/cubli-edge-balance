@@ -992,29 +992,25 @@ static void enc_build_frame_at(uint16_t d, uint8_t mg, uint8_t off)
     fake_ssi_frame[3] = (uint8_t)(w32 & 0xFFu);
 }
 
-/* The MT6701 shifts out 24 data bits and then 8 idle bits, so a reader that
- * slipped by a whole byte sees the same stream rotated, not shifted: the first
- * byte comes back around at the end. This is the slip the hardware showed as
- * "60 2e ff 7d" after a good "7d 60 2e ff" (docs/00 #054). */
-static void enc_build_frame_rot(uint16_t d, uint8_t mg, uint8_t idle)
+/* The MT6701 shifts out 24 data bits, then the line idles high for however
+ * many clocks are left in the burst. It does NOT restart its frame counter
+ * when CSN rises, so a burst cut short leaves the next read 8/16/24 bits into
+ * the frame - a whole-byte ROTATION of the 32-bit word, not a shift. */
+static void enc_build_frame_rot(uint16_t d, uint8_t mg, uint8_t bytes)
 {
     uint32_t bits = (((uint32_t)d & 0x3FFFu) << 4) | ((uint32_t)mg & 0x0Fu);
     uint8_t  crc  = mid_enc_crc6(bits);
     uint32_t w    = (bits << 6) | (uint32_t)(crc & 0x3Fu);
-    uint8_t  b0   = (uint8_t)((w >> 16) & 0xFFu);
-    uint8_t  b1   = (uint8_t)((w >> 8) & 0xFFu);
-    uint8_t  b2   = (uint8_t)(w & 0xFFu);
+    uint8_t  raw[4];
+    uint8_t  i;
 
-    if (idle == 0u) {
-        fake_ssi_frame[0] = b0;
-        fake_ssi_frame[1] = b1;
-        fake_ssi_frame[2] = b2;
-        fake_ssi_frame[3] = 0xFFu;          /* line idles high */
-    } else {
-        fake_ssi_frame[0] = b1;
-        fake_ssi_frame[1] = b2;
-        fake_ssi_frame[2] = 0xFFu;
-        fake_ssi_frame[3] = b0;             /* first byte wrapped around */
+    raw[0] = (uint8_t)((w >> 16) & 0xFFu);
+    raw[1] = (uint8_t)((w >> 8) & 0xFFu);
+    raw[2] = (uint8_t)(w & 0xFFu);
+    raw[3] = 0xFFu;                         /* line idles high */
+
+    for (i = 0u; i < 4u; i++) {
+        fake_ssi_frame[i] = raw[(uint8_t)((i + bytes) & 3u)];
     }
 }
 
@@ -1147,7 +1143,7 @@ static void test_enc(void)
     }
     section_end();
 
-    section("enc: a whole-byte rotation is recovered (period-32 stream)");
+    section("enc: byte rotations are recovered (period-32 stream)");
     {
         uint32_t errs_before;
 
@@ -1160,13 +1156,30 @@ static void test_enc(void)
         mid_enc_update();
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_info()->raw == 3000u);
+        T(mid_enc_win() == 0u);
 
-        enc_build_frame_rot(3000u, 0u, 1u);     /* next read starts a byte late */
+        /* One, two and three bytes late: 8, 16 and 24 bits of rotation. The
+         * hardware showed all three (docs/00 #054, #055). */
+        enc_build_frame_rot(3000u, 0u, 1u);
         mid_enc_update();
         T(mid_enc_info()->crc_errs == errs_before);
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_info()->raw == 3000u);
-        T(mid_enc_win() == 24u);                /* rotated back by one byte */
+        T(mid_enc_win() == 24u);
+
+        enc_build_frame_rot(3000u, 0u, 2u);
+        mid_enc_update();
+        T(mid_enc_info()->crc_errs == errs_before);
+        T(mid_enc_info()->crc_ok == 1u);
+        T(mid_enc_info()->raw == 3000u);
+        T(mid_enc_win() == 16u);
+
+        enc_build_frame_rot(3000u, 0u, 3u);
+        mid_enc_update();
+        T(mid_enc_info()->crc_errs == errs_before);
+        T(mid_enc_info()->crc_ok == 1u);
+        T(mid_enc_info()->raw == 3000u);
+        T(mid_enc_win() == 8u);
 
         enc_build_frame_rot(3000u, 0u, 0u);     /* and straight back to phase 0 */
         mid_enc_update();

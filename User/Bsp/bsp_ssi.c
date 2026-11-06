@@ -274,6 +274,14 @@ uint8_t bsp_ssi_read(uint8_t frame[BSP_SSI_FRAME_LEN])
 {
     uint32_t spin = 0u;
 
+    /* Never abort a frame that is still shifting: CSN rising mid-frame
+     * leaves the MT6701 counting inside the frame, and command-time reads are
+     * exactly what produced the 8/16/24-bit phase slips seen on hardware. */
+    while ((bsp_ssi_busy() != 0u) && (spin < 200000u)) {
+        spin++;
+    }
+    spin = 0u;
+
     bsp_ssi_abort();                        /* drop anything left over */
     bsp_ssi_start();
     while ((bsp_ssi_busy() == 0u) && (spin < 4000000u)) {
