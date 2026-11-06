@@ -14,7 +14,8 @@
 #include "mid_log.h"
 #include "bsp_stack.h"
 
-#define CRASH_MAGIC      0x434C4F47u  /* 'CLOG' */
+#define CRASH_MAGIC      0x434C4F47u  /* 'CLOG': fresh, not yet shown */
+#define CRASH_MAGIC_SHOWN 0x434C4F52u /* 'CLOR': shown once, still readable */
 #define CRASH_SLOT_MAGIC 0u
 #define CRASH_SLOT_KIND  1u
 #define CRASH_SLOT_PC    2u
@@ -164,36 +165,61 @@ void bsp_crash_hold(void)
     uint32_t kind = *crash_slot(CRASH_SLOT_KIND);
     uint32_t blinks = (kind >= BSP_CRASH_KIND_USAGE) ? 2u : (6u - kind);
 
+    /* Slow enough to read at a glance. The first version used 400k and 4M
+     * NOPs, which at 170 MHz is 2.4 ms on / 2.4 ms off / 24 ms gap: the eye
+     * integrates that into "LED looks permanently on", which is also what the
+     * armed state looks like. Now: 150 ms on, 150 ms off, 1 s between groups. */
     for (;;)
     {
         for (uint32_t i = 0u; i < blinks; ++i)
         {
             LED_GPIO_Port->BSRR = (uint32_t)LED_Pin << 16u;
-            for (volatile uint32_t d = 0u; d < 400000u; ++d)
+            for (volatile uint32_t d = 0u; d < 5000000u; ++d)
             {
                 __NOP();
             }
             LED_GPIO_Port->BSRR = (uint32_t)LED_Pin;
-            for (volatile uint32_t d = 0u; d < 400000u; ++d)
+            for (volatile uint32_t d = 0u; d < 5000000u; ++d)
             {
                 __NOP();
             }
         }
-        for (volatile uint32_t d = 0u; d < 4000000u; ++d)
+        for (volatile uint32_t d = 0u; d < 33000000u; ++d)
         {
             __NOP();
         }
     }
 }
 
+static uint8_t crash_magic_is(uint32_t want)
+{
+    return (*crash_slot(CRASH_SLOT_MAGIC) == want) ? 1u : 0u;
+}
+
 uint8_t bsp_crash_valid(void)
 {
-    return (*crash_slot(CRASH_SLOT_MAGIC) == CRASH_MAGIC) ? 1u : 0u;
+    return (uint8_t)(crash_magic_is(CRASH_MAGIC) | crash_magic_is(CRASH_MAGIC_SHOWN));
+}
+
+/* 1 = captured but not printed yet (the boot banner owns that one shot). */
+uint8_t bsp_crash_pending(void)
+{
+    return crash_magic_is(CRASH_MAGIC);
+}
+
+/* The banner prints the block once and then only marks it as shown: the record
+ * itself survives, so 'crash' can replay it long after the boot message is
+ * gone. Clearing is an explicit operator action ('crash clear'). */
+static void crash_mark_shown(void)
+{
+    *crash_slot(CRASH_SLOT_MAGIC) = CRASH_MAGIC_SHOWN;
 }
 
 void bsp_crash_clear(void)
 {
-    for (uint32_t i = 0u; i < 8u; ++i)
+    /* Slot 0 first, so a half-cleared record can never look valid. */
+    *crash_slot(CRASH_SLOT_MAGIC) = 0u;
+    for (uint32_t i = 1u; i < 8u; ++i)
     {
         *crash_slot(i) = 0u;
     }
@@ -268,8 +294,11 @@ void bsp_crash_report(void)
      * the flags forever and every later boot looks the same. */
     uint32_t csr = RCC->CSR;
 
-    crash_print_block();
-    bsp_crash_clear();
+    if (bsp_crash_pending() != 0u)
+    {
+        crash_print_block();
+        crash_mark_shown();
+    }
 
     log_printf("reset = pin %u por %u soft %u iwdg %u wwdg %u lowpwr %u ob %u",
                (unsigned)((csr & RCC_CSR_PINRSTF) ? 1u : 0u),

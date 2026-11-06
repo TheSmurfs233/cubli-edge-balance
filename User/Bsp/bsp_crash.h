@@ -33,6 +33,9 @@ void bsp_crash_hold(void);
 /* 1 when the backup registers hold a record from a previous run. */
 uint8_t bsp_crash_valid(void);
 
+/* 1 = a record exists but the boot banner has not printed it yet. */
+uint8_t bsp_crash_pending(void);
+
 /* Print the record and the reset cause, then wipe it. Call once per boot. */
 void bsp_crash_report(void);
 

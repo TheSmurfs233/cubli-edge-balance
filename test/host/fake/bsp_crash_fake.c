@@ -24,6 +24,11 @@ uint8_t bsp_crash_valid(void)
     return 0u;
 }
 
+uint8_t bsp_crash_pending(void)
+{
+    return 0u;
+}
+
 void bsp_crash_report(void)
 {
     s_reported = 1u;
