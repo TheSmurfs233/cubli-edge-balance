@@ -47,6 +47,8 @@ static uint8_t   s_tx_dma_buf[DBG_TX_DMA_CHUNK];
 static volatile uint8_t s_tx_busy;              /* 1 = DMA transmit in flight */
 static uint32_t  s_tx_start_ms;                 /* when s_tx_busy was set */
 static uint32_t  s_tx_stuck_cnt;                /* watchdog recoveries */
+static uint32_t  s_tx_retry_cnt;                /* consecutive HAL_BUSY retries */
+static uint32_t  s_tx_busy_cnt;                 /* HAL_BUSY recoveries (forced abort) */
 static uint8_t   s_cfg_err;                     /* BSP_UART_CFG_* bitmask */
 
 /* ------------------------------------------------------------------ */
@@ -61,6 +63,8 @@ void bsp_uart_init(void)
     s_tx_busy     = 0u;
     s_tx_start_ms = 0u;
     s_tx_stuck_cnt = 0u;
+    s_tx_retry_cnt = 0u;
+    s_tx_busy_cnt  = 0u;
 
     /* Cross-check the two things this driver *assumes* about the CubeMX side.
      * Both have been wrong before and both fail silently:
@@ -122,10 +126,20 @@ void bsp_uart_tx_pump(void)
     s_tx_busy     = 1u;
     s_tx_start_ms = HAL_GetTick();
     if (HAL_UART_Transmit_DMA(&huart2, s_tx_dma_buf, n) != HAL_OK) {
-        /* UART still busy: keep the data queued, retry next round */
+        /* Keep the data queued and retry next round.  If HAL keeps saying
+         * busy the handle is wedged (gState never returns to READY, which is
+         * how tx_pending froze at 412 B on 2026-11-06): force one abort so
+         * the state machine is reset instead of staying mute forever. */
         s_tx_busy = 0u;
+        s_tx_retry_cnt++;
+        if (s_tx_retry_cnt >= DBG_TX_BUSY_ABORT) {
+            (void)HAL_UART_AbortTransmit(&huart2);
+            s_tx_retry_cnt = 0u;
+            s_tx_busy_cnt++;
+        }
         return;
     }
+    s_tx_retry_cnt = 0u;
     /* The DMA holds its own copy of the data, safe to drop from the ring */
     ring_drop(&s_tx_ring, n);
 }
@@ -148,6 +162,21 @@ uint8_t bsp_uart_tx_idle(void)
 uint32_t bsp_uart_tx_stuck_count(void)
 {
     return s_tx_stuck_cnt;
+}
+
+uint32_t bsp_uart_tx_busy_count(void)
+{
+    return s_tx_busy_cnt;
+}
+
+uint32_t bsp_uart_handle_state(void)
+{
+    return (uint32_t)huart2.gState;
+}
+
+uint32_t bsp_uart_handle_error(void)
+{
+    return huart2.ErrorCode;
 }
 
 /* ------------------------------------------------------------------ */

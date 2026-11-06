@@ -40,6 +40,9 @@ uint8_t  bsp_uart_tx_idle(void);
  * event. Non-zero means the link glitched at least once; the driver already
  * recovered, nothing to do, but it is worth watching in "stat". */
 uint32_t bsp_uart_tx_stuck_count(void);
+uint32_t bsp_uart_tx_busy_count(void);
+uint32_t bsp_uart_handle_state(void);
+uint32_t bsp_uart_handle_error(void);
 
 /* Read received bytes from the ring buffer */
 uint16_t bsp_uart_rx_read(uint8_t *dst, uint16_t max);

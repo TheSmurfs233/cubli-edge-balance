@@ -257,6 +257,10 @@ extern "C" {
  * Without this, s_tx_busy would stay set forever and the debug link would go
  * permanently silent while the motor keeps running. See bsp_uart_tx_pump(). */
 #define DBG_TX_STUCK_MS         100u
+/* Consecutive HAL_BUSY answers from HAL_UART_Transmit_DMA before forcing an
+ * abort.  The handle can wedge with gState stuck in BUSY_TX, and then the
+ * pump would silently retry forever (tx_pending froze at 412 B). */
+#define DBG_TX_BUSY_ABORT       50u
 
 /* Waveform output goes out on the SAME UART as the text (USART2) using the
  * FireWater text protocol, so VOFA+ can plot and you can still read the log. */

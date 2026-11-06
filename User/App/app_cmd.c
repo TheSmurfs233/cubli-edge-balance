@@ -129,6 +129,7 @@ static void print_help(void)
     log_printf(" help           show this list");
     log_printf(" ver            version and board info");
     log_printf(" stat           runtime status snapshot");
+    log_printf(" uart           debug link state: ring, gState, retries");
     log_printf(" start          start (select a mode first)");
     log_printf(" stop           stop and shut the bridge down");
     log_printf(" mode <0|1|2>   0=IDLE 1=OPENLOOP 2=FOC");
@@ -253,6 +254,26 @@ static void print_stat(void)
                (unsigned)bsp_uart_rx_drop_count(),
                (unsigned)bsp_uart_tx_pending(),
                (unsigned)bsp_uart_tx_stuck_count());
+    log_printf("----------------");
+}
+
+/* Debug link internals.  The interesting one is gState: if it stays 2
+ * (HAL_UART_STATE_BUSY_TX) while tx_pending does not move, the HAL handle is
+ * wedged and every later Transmit_DMA returns busy -- that is what made the
+ * console go mute while the MCU kept running (18#T21). */
+static void print_uart(void)
+{
+    log_printf("---- uart (USART2 debug) ----");
+    log_printf(" baud   = %u", (unsigned)DBG_UART_BAUD);
+    log_printf(" tx     = pending %u B, free %u B, idle %s",
+               (unsigned)bsp_uart_tx_pending(), (unsigned)bsp_uart_tx_space(),
+               (bsp_uart_tx_idle() != 0u) ? "yes" : "no");
+    log_printf(" handle = gState %u, ErrorCode 0x%08X",
+               (unsigned)bsp_uart_handle_state(), (unsigned)bsp_uart_handle_error());
+    log_printf(" counts = stuck %u, busy %u, rx_drop %u",
+               (unsigned)bsp_uart_tx_stuck_count(),
+               (unsigned)bsp_uart_tx_busy_count(),
+               (unsigned)bsp_uart_rx_drop_count());
     log_printf("----------------");
 }
 
@@ -888,6 +909,9 @@ static float   s_pll_zeta = PLL_ZETA;
         print_version();
     }
     /* ---------------- stat ---------------- */
+    else if (strcmp(tok[0], "uart") == 0) {
+        print_uart();
+    }
     else if (strcmp(tok[0], "stat") == 0) {
         print_stat();
     }

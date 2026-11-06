@@ -84,6 +84,7 @@ typedef struct {
     DMA_HandleTypeDef *hdmatx;
     uint32_t           RxEventType; /* HAL_UART_RXEVENT_TC / HT / IDLE */
     uint32_t           ErrorCode;   /* cleared by the IMU error callback */
+uint32_t           gState;      /* 1 = READY, 2 = BUSY_TX (HAL_UART_StateTypeDef) */
 } UART_HandleTypeDef;
 
 #define HAL_UART_ERROR_NONE     (0x00000000u)
