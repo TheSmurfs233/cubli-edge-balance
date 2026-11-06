@@ -61,3 +61,5 @@ mon_*.txt
 mon[0-9]*.txt
 MDK-ARM/.tmp_env_*.txt
 
+MDK-ARM/.tmp*
+.tmp_env/*.txt
