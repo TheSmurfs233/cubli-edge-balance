@@ -601,6 +601,28 @@ uint8_t app_balance_start_now(void)
 {
     uint8_t rc;
 
+    /* One button must be enough: bring the bridge up first. "mode 2" + "start"
+     * only prepare the FOC loop (50% zero vector, current-zero calibration);
+     * no torque flows until the balance law commands one. */
+    if (s_st.mode != CTRL_FOC)
+    {
+        rc = app_set_mode((uint8_t)CTRL_FOC);
+        if (rc != 0u)
+        {
+            s_run.drive_ret = rc;
+            return 7u;                 /* could not select the FOC mode */
+        }
+    }
+    if (s_st.state != APP_ST_RUN)
+    {
+        rc = app_start();
+        if (rc != 0u)
+        {
+            s_run.drive_ret = rc;
+            return 7u;                 /* could not start the bridge */
+        }
+    }
+
     /* The operator is holding the cube where it is supposed to balance, so make
      * that pose the zero. A guessed ATT_OFFSET_DEG sat 0.9 deg away from the
      * real equilibrium once, which is ~5 mN.m of constant torque and a wheel
@@ -2644,13 +2666,37 @@ const app_status_t *app_status(void)
 /* ------------------------------------------------------------------ */
 /* Key action                                                          */
 /*                                                                     */
-/* Short press : LED toggle, and disarm the loop if it is armed.        */
-/* Long press  : take the held pose as zero, arm and engage (S6 start). */
+/* Press + release : take the held pose as zero, start the drive and    */
+/*                   engage BAL_KEY_START_DELAY_MS after the release.   */
+/* Long press      : the same, but engage immediately (bench use).      */
+/* Press while armed: disarm (the safety valve that needs no console).  */
 /* ------------------------------------------------------------------ */
 static void key_action(uint32_t now)
 {
     static uint32_t s_key_t_down = 0u;
-    static uint8_t  s_key_hold_done = 0u;
+    static uint8_t  s_key_wait_release = 0u;   /* pressed, waiting for release */
+    static uint8_t  s_key_fired = 0u;          /* the long press already acted */
+    static uint32_t s_key_start_at = 0u;       /* 0 = nothing scheduled        */
+
+    /* Scheduled start: counted from the release, so the operator has the whole
+     * delay to settle the cube and get the hand away before torque appears. */
+    if ((s_key_start_at != 0u) && ((int32_t)(now - s_key_start_at) >= 0))
+    {
+        uint8_t rc;
+
+        s_key_start_at = 0u;
+        rc = app_balance_start_now();
+        if (rc == 0u)
+        {
+            bsp_led_write(1u);
+            log_printf("[KEY] start -> balance ENGAGED (zero taken)");
+        }
+        else
+        {
+            bsp_led_write(0u);
+            log_printf("[KEY] start -> balance refused (rc %u)", (unsigned)rc);
+        }
+    }
 
     if (bsp_key_is_down() != 0u)
     {
@@ -2658,13 +2704,39 @@ static void key_action(uint32_t now)
         {
             s_key_t_down = now;
         }
-        if ((s_key_hold_done == 0u) &&
+
+        /* The press edge is consumed while still held, so the countdown starts
+         * from the release and not from whenever the debounce noticed it. */
+        if (bsp_key_take_press())
+        {
+            if (app_balance_info()->state != (uint8_t)BAL_ST_DISARMED)
+            {
+                (void)app_balance_arm(0u);
+                bsp_led_write(0u);
+                s_key_wait_release = 0u;
+                s_key_start_at = 0u;
+                log_printf("[KEY] pressed -> balance DISARMED");
+            }
+            else
+            {
+                s_key_start_at = 0u;           /* a new press restarts the plan */
+                s_key_wait_release = 1u;
+                bsp_led_toggle();
+                s_st.key_cnt = bsp_key_press_count();
+                log_printf("[KEY] pressed #%u -> release to start, %u ms",
+                           (unsigned)s_st.key_cnt,
+                           (unsigned)BAL_KEY_START_DELAY_MS);
+            }
+        }
+
+        if ((s_key_fired == 0u) &&
             ((uint32_t)(now - s_key_t_down) >= (uint32_t)BAL_KEY_HOLD_MS))
         {
             uint8_t rc;
 
-            s_key_hold_done = 1u;
-            (void)bsp_key_take_press();        /* the release must not re-trigger */
+            s_key_fired = 1u;
+            s_key_wait_release = 0u;
+            s_key_start_at = 0u;               /* long press overrides          */
             rc = app_balance_start_now();
             if (rc == 0u)
             {
@@ -2682,28 +2754,19 @@ static void key_action(uint32_t now)
     }
 
     s_key_t_down = 0u;
-    if (s_key_hold_done != 0u)
+    if (s_key_fired != 0u)
     {
-        s_key_hold_done = 0u;
+        s_key_fired = 0u;
         (void)bsp_key_take_press();
         return;                                /* the long press already acted */
     }
 
-    if (bsp_key_take_press())
+    if (s_key_wait_release != 0u)
     {
-        if (app_balance_info()->state != (uint8_t)BAL_ST_DISARMED)
-        {
-            (void)app_balance_arm(0u);
-            bsp_led_write(0u);
-            log_printf("[KEY] pressed -> balance DISARMED");
-            return;
-        }
-
-        bsp_led_toggle();
-        s_st.key_cnt = bsp_key_press_count();
-        log_printf("[KEY] pressed #%u -> LED %s",
-                   (unsigned)s_st.key_cnt,
-                   bsp_led_is_on() ? "ON" : "OFF");
+        s_key_wait_release = 0u;
+        s_key_start_at = now + (uint32_t)BAL_KEY_START_DELAY_MS;
+        log_printf("[KEY] released -> engaging in %u ms, hand off the cube",
+                   (unsigned)BAL_KEY_START_DELAY_MS);
     }
 }
 

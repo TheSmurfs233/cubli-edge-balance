@@ -817,14 +817,19 @@ extern "C" {
 #define BAL_HELD_DPS            5.0f    /* body below this counts as "static" */
 
 /* Button start (2026-11-06).
- * Holding KEY for BAL_KEY_HOLD_MS takes the pose being held as zero, arms the
- * loop and engages it at once. That removes the race between "arm" and "let go":
- * engage-on-release fired on hand tremor and slammed the wheel to the 1700 rpm
- * trip line in 0.47 s (docs/00 #032). The first BAL_ENGAGE_RAMP_MS of the run
- * ramp the torque ceiling, so an imperfect release position cannot become a
+ * Single press + release: the pose being held becomes zero, the drive is
+ * started, and the loop engages BAL_KEY_START_DELAY_MS after the button is
+ * released - the operator uses those 3 s to settle the cube and get the hand
+ * away. Holding KEY for BAL_KEY_HOLD_MS still works as an immediate engage for
+ * bench work. Both paths go through app_balance_start_now(), which starts the
+ * drive itself (mode FOC + start) so the button alone is enough.
+ * Engage-on-release fired on hand tremor and slammed the wheel to the 1700 rpm
+ * trip line in 0.47 s (docs/00 #032); the first BAL_ENGAGE_RAMP_MS of the run
+ * ramp the torque ceiling so an imperfect release position cannot become a
  * full-scale command. */
-#define BAL_KEY_HOLD_MS         3000u
-#define BAL_ENGAGE_RAMP_MS      800u
+#define BAL_KEY_HOLD_MS         3000u   /* still: hold this long = engage now */
+#define BAL_KEY_START_DELAY_MS  3000u   /* press+release -> engage after this */
+#define BAL_ENGAGE_RAMP_MS      800u    /* soft start after engage            */
 #define BAL_HELD_MS             150u    /* 30 frames at 200 Hz               */
 
 /* Engage-on-release. "bal run on" only arms: no torque flows until the body

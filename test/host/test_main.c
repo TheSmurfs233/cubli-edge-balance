@@ -3478,46 +3478,77 @@ static void test_s6(void)
 }
 
 /* ================================================================== */
-/* S6 button start: one long press must zero the held pose, arm and        */
-/* engage, and the first commands must be ramped so an imperfect release   */
-/* pose cannot become a full-scale wheel spin.                             */
+/* S6 button start: one press+release must take the held pose as zero, start
+ * the drive, and engage after BAL_KEY_START_DELAY_MS; the first commands are
+ * ramped so an imperfect release pose cannot become a full-scale wheel spin. */
 static void test_balkey(void)
 {
     const app_bal_run_t *r;
     float tau0;
 
-    section("balkey: refuses while the bridge is idle");
+    section("balkey: one call starts the bridge by itself");
     cmd_feed("stop\r\n");
     pump_all();
-    T(app_balance_start_now() == 5u);          /* drive not ready */
     T(app_balance_info()->state == BAL_ST_DISARMED);
-    section_end();
-
-    section("balkey: zero, arm and engage in one call");
-    cmd_feed("mode 2\r\n");
-    force_current_ready();
-    cmd_feed("start\r\n");
-    att_feed_rate(0.4f, 0.0f, 90u);
-    s6_pump();
+    att_feed_rate(0.3f, 0.0f, 95u);
     tx_clear();
-    T(app_balance_start_now() == 0u);
+    T(app_balance_start_now() == 0u);          /* mode FOC + start inside */
+    T(app_status()->state == APP_ST_RUN);
+    T(app_status()->mode == CTRL_FOC);
     r = app_balance_info();
     T(r->engaged == 1u);
     T(r->state == BAL_ST_ARMED);
     T(fabsf(att_get()->theta_deg) < 0.01f);    /* the held pose became zero */
     section_end();
 
+    section("balkey: a stale attitude frame is refused");
+    (void)app_balance_arm(0u);
+    fake_tick_add((uint32_t)IMU_FRAME_TIMEOUT_MS + 50u);
+    app_att_update();                          /* age -> valid = 0 */
+    T(app_balance_start_now() == 1u);          /* attitude invalid */
+    T(app_balance_info()->state == BAL_ST_DISARMED);
+    section_end();
+
+    section("balkey: press then release schedules, then engages");
+    cmd_feed("stop\r\n");
+    pump_all();
+    (void)bsp_key_take_press();
+    (void)bsp_key_take_release();
+    fake_key_set(1);
+    fake_tick_add(40u);
+    app_loop();                                /* first sample of the new level */
+    fake_tick_add(40u);
+    tx_clear();
+    app_loop();                                /* debounce satisfied */
+    T(tx_contains("[KEY] pressed"));
+
+    fake_key_set(0);
+    fake_tick_add(40u);
+    app_loop();
+    fake_tick_add(40u);
+    tx_clear();
+    app_loop();
+    T(tx_contains("released -> engaging"));
+    T(app_balance_info()->state == BAL_ST_DISARMED);
+
+    fake_tick_add((uint32_t)BAL_KEY_START_DELAY_MS + 50u);
+    att_feed_rate(0.2f, 0.0f, 96u);
+    tx_clear();
+    app_loop();
+    T(tx_contains("[KEY] start -> balance ENGAGED"));
+    T(app_balance_info()->engaged == 1u);
+    T(app_status()->state == APP_ST_RUN);
+    section_end();
+
     section("balkey: first command is ramped, not full scale");
-    /* 2 deg through kp*BAL_SCALE is about 16 mN.m; at t=0 the ramp keeps the
-     * ceiling at one slew step, and only opens up as the timer advances. */
-    att_feed_rate(2.0f, 0.0f, 91u);
+    att_feed_rate(2.0f, 0.0f, 97u);
     s6_pump();
     tau0 = fabsf(app_balance_info()->tau_applied_mnm);
     T(tau0 <= BAL_SLEW_MNM_STEP + 0.01f);
     T(tau0 > 0.0f);
 
     fake_tick_add((uint32_t)BAL_ENGAGE_RAMP_MS + 20u);
-    att_feed_rate(2.0f, 0.0f, 92u);
+    att_feed_rate(2.0f, 0.0f, 98u);
     s6_pump();
     T(fabsf(app_balance_info()->tau_applied_mnm) > tau0 + 1.0f);
     section_end();
@@ -3525,7 +3556,6 @@ static void test_balkey(void)
     cmd_feed("bal run off\r\n");
     cmd_feed("stop\r\n");
 }
-
 /* ================================================================== */
 static void banner_reset(void)
 {
