@@ -149,6 +149,31 @@ uint16_t bsp_uart_tx_pending(void)
     return ring_avail(&s_tx_ring);
 }
 
+/* Verify that no stray write has damaged either ring descriptor.
+ * Cheap enough to run from the main-loop guard every 256 iterations. */
+static uint32_t ring_health(const ringbuf_t *r, const uint8_t *mem, uint16_t size)
+{
+    uint32_t bad = 0u;
+
+    if (r->size != size)          { bad |= 1u; }
+    if (r->mask != (uint16_t)(size - 1u)) { bad |= 2u; }
+    if (r->buf  != mem)           { bad |= 4u; }
+    if (r->head >= size)          { bad |= 8u; }
+    if (r->tail >= size)          { bad |= 16u; }
+
+    return bad;
+}
+
+uint32_t bsp_uart_ring_health(void)
+{
+    uint32_t bad;
+
+    bad  = ring_health(&s_tx_ring, s_tx_ring_mem, (uint16_t)DBG_TX_RING_SIZE);
+    bad |= (uint32_t)(ring_health(&s_rx_ring, s_rx_ring_mem, (uint16_t)DBG_RX_RING_SIZE) << 8);
+
+    return bad;
+}
+
 uint16_t bsp_uart_tx_space(void)
 {
     return ring_space(&s_tx_ring);

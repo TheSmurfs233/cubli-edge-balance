@@ -35,6 +35,8 @@
 #include "bsp_ssi.h"
 #include "bsp_sys.h"
 #include "bsp_uart.h"
+#include "bsp_crash.h"
+#include "bsp_stack.h"
 #include "mid_att.h"
 #include "mid_current.h"
 #include "mid_enc.h"
@@ -887,6 +889,11 @@ void app_balance_update(void)
 /* ------------------------------------------------------------------ */
 void app_init(void)
 {
+    /* Publish the backup domain first: the fault record from the previous run
+     * lives there and the banner prints it a few lines further down. */
+    bsp_crash_init();
+    bsp_stack_paint();   /* record how deep the stack ever gets */
+
     /* S10.1: shadow observer. Starts disabled; "obs on" arms it. */
     alg_obs_init(&s_obs, MOTOR_R_OHM, MOTOR_L_H, OBS_LPF_HZ,
                   OBS_PLL_WN_HZ, OBS_W_MAX_RADS);
@@ -1040,6 +1047,11 @@ void app_init(void)
                (ATT_SIGN < 0.0f) ? "-1" : "+1",
                (double)ATT_OFFSET_DEG, (double)ATT_RANGE_DEG,
                (unsigned)ATT_TIMEOUT_MS);
+
+    /* Fault record left by the previous run, plus the reason this one started.
+     * Both are wiped afterwards so the next reset reads clean. */
+    bsp_crash_report();
+
     log_printf("---------------------------------------------");
     log_printf(" KEY -> LED toggle");
     log_printf(" type 'help' for the command list");
@@ -2755,6 +2767,88 @@ const app_status_t *app_status(void)
 /* Long press      : the same, but engage immediately (bench use).      */
 /* Press while armed: disarm (the safety valve that needs no console).  */
 /* ------------------------------------------------------------------ */
+/* Cheap runtime invariant: the FPU must stay enabled.
+ *
+ * A VFP instruction with CP10/CP11 switched off raises UsageFault/UNDEFINSTR,
+ * which is exactly the signature of the 2026-11-07 bench crash (PC on a
+ * VMUL.F32). If a stray write ever clears CPACR we want to see it happen
+ * instead of finding the corpse afterwards, so this runs every 256 loops,
+ * logs the first few events and restores the enable bits. */
+static uint32_t s_cpacr_bad;
+static uint32_t s_ring_bad;
+static uint32_t s_state_bad;
+
+static void guard_check(void)
+{
+    uint32_t cpacr;
+    uint32_t ring;
+    uint32_t bad;
+
+    if ((s_loop_cnt & 0xFFu) != 0u)
+    {
+        return;
+    }
+
+    /* Ring descriptors and the balance state are the two places a stray write
+     * would turn into a wild pointer later. Check them while they are still
+     * describable: a corrupted ringbuf_t (.buf) makes the next ring_push()
+     * store into an address nobody intended, which is exactly how the bench
+     * crashes presented (BFAR just above RAM). */
+    ring = bsp_uart_ring_health();
+    if ((ring != 0u) && (s_ring_bad == 0u))
+    {
+        log_printf("[GUARD] ring struct corrupt: %x", (unsigned)ring);
+    }
+    s_ring_bad = ring;
+
+    bad = 0u;
+    if ((s_bal.phi_deg != s_bal.phi_deg) || (fabsf(s_bal.phi_deg) > 200.0f)) { bad |= 1u; }
+    if (fabsf(s_bal.tau_mnm) > 500.0f)                                        { bad |= 2u; }
+    if (s_run.state > (uint8_t)BAL_ST_TRIP)                                   { bad |= 4u; }
+    if (s_run.trip > (uint8_t)BAL_TRIP_HELD)                                { bad |= 8u; }
+    if ((bad != 0u) && (s_state_bad == 0u))
+    {
+        log_printf("[GUARD] balance state corrupt: %x, phi %.2f, tau %.2f, state %u, trip %u",
+                   (unsigned)bad, (double)s_bal.phi_deg, (double)s_bal.tau_mnm,
+                   (unsigned)s_run.state, (unsigned)s_run.trip);
+    }
+    s_state_bad = bad;
+
+    cpacr = (uint32_t)0x00F00000u;   /* host build: pretend it is fine */
+#ifdef SCB
+    cpacr = SCB->CPACR;
+#endif
+    if ((cpacr & 0x00F00000u) == 0x00F00000u)
+    {
+        return;
+    }
+    ++s_cpacr_bad;
+#ifdef SCB
+    SCB->CPACR = cpacr | 0x00F00000u;
+    __DSB();
+    __ISB();
+#endif
+    if (s_cpacr_bad <= 3u)
+    {
+        log_printf("[GUARD] CPACR lost the FPU: %x, restored", (unsigned)cpacr);
+    }
+}
+
+uint32_t app_guard_ring_bad(void)
+{
+    return s_ring_bad;
+}
+
+uint32_t app_guard_state_bad(void)
+{
+    return s_state_bad;
+}
+
+uint32_t app_guard_cpacr_bad(void)
+{
+    return s_cpacr_bad;
+}
+
 static void key_action(uint32_t now)
 {
     static uint32_t s_key_t_down = 0u;
@@ -3382,5 +3476,6 @@ void app_loop(void)
     task_wave(now);
 
     s_loop_cnt++;
+    guard_check();
     bsp_prof_add(PROF_LOOP, t_loop);
 }

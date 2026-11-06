@@ -55,3 +55,8 @@ desktop.ini
 .DS_Store
 MDK-ARM/*.lst
 sim/.t20_*.npy
+
+# local scratch (monitor logs, disassembly dumps)
+mon_*.txt
+MDK-ARM/.tmp_env_*.txt
+

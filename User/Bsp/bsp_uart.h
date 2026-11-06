@@ -49,6 +49,14 @@ uint16_t bsp_uart_rx_read(uint8_t *dst, uint16_t max);
 uint16_t bsp_uart_rx_avail(void);
 uint32_t bsp_uart_rx_drop_count(void);
 
+/* Bitmask of runtime ring-structure corruption found by the main-loop guard.
+ * 0x01 = TX ring, 0x02 = RX ring.  0 = healthy.
+ * A valid ringbuf_t must keep size == capacity, mask == size-1, buf == its
+ * own array and both indices inside [0, size); anything else means some other
+ * code has written into the struct and the next ring_push() would store
+ * through a wild pointer. */
+uint32_t bsp_uart_ring_health(void);
+
 #ifdef __cplusplus
 }
 #endif

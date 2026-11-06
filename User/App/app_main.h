@@ -338,6 +338,9 @@ uint8_t app_bal_auto_get(void);
  * Returns 0 OK, 2 not running, 3 no attitude, 4 bad gains, 5 wheel reading out
  * of the trusted band (|omega| > 1200 rpm). Manual override: closes the walk. */
 uint8_t app_bal_snap(void);
+
+/* Number of times the FPU enable bits in CPACR had to be restored. */
+uint32_t app_guard_cpacr_bad(void);
 /* Evaluate once. Called from app_loop(); also from blocking commands so the
  * sample they print is the newest one. */
 void app_bal_update(void);

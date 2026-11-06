@@ -22,6 +22,7 @@
 #include "stm32g4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "bsp_crash.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -92,7 +93,9 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+  bsp_crash_save_regs();
+  bsp_crash_capture(BSP_CRASH_KIND_HARD);
+  bsp_crash_hold();
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
@@ -107,7 +110,9 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
-
+  bsp_crash_save_regs();
+  bsp_crash_capture(BSP_CRASH_KIND_MM);
+  bsp_crash_hold();
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
   {
@@ -122,7 +127,9 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
-
+  bsp_crash_save_regs();
+  bsp_crash_capture(BSP_CRASH_KIND_BUS);
+  bsp_crash_hold();
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
   {
@@ -137,7 +144,9 @@ void BusFault_Handler(void)
 void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
-
+  bsp_crash_save_regs();
+  bsp_crash_capture(BSP_CRASH_KIND_USAGE);
+  bsp_crash_hold();
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)
   {

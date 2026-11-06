@@ -22,6 +22,7 @@
 #include "bsp_pwm.h"
 #include "bsp_ssi.h"
 #include "bsp_uart.h"
+#include "bsp_stack.h"
 #include "mid_att.h"
 #include "mid_current.h"
 #include "mid_enc.h"
@@ -254,6 +255,11 @@ static void print_stat(void)
                (unsigned)bsp_uart_rx_drop_count(),
                (unsigned)bsp_uart_tx_pending(),
                (unsigned)bsp_uart_tx_stuck_count());
+    log_printf(" guard    = cpacr repairs %u",
+               (unsigned)app_guard_cpacr_bad());
+    log_printf(" stack    = peak %u B of %u B",
+               (unsigned)bsp_stack_peak_bytes(),
+               (unsigned)bsp_stack_size_bytes());
     log_printf("----------------");
 }
 
