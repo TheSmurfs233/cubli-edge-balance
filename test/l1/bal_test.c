@@ -243,14 +243,30 @@ int main(void)
   chk((alg_bal_trim_deg() > 0.13f) && (alg_bal_trim_deg() < 0.17f),
       "17c a backward wheel walks the trim forward");
 
-  /* 18. clamp: a wheel that never stops cannot walk the trim forever */
+  /* 18. a saturated law must stop the walk: bench 2026-11-06 showed the walk
+   *     ramming the clamp while the torque sat at the ceiling, and the body
+   *     falling right after.  Now the walk freezes as soon as the law saturates,
+   *     so a wheel that never stops cannot drag the reference to the clamp. */
+  alg_bal_init(&cfg);
   for (i = 0; i < 20000; i++)
   {
     alg_bal_step(0.0f, 0.0f, 900.0f * RPM2RPS, &out);
     alg_bal_adapt(0.005f);
   }
-  chk(absf(alg_bal_trim_deg() + 2.0f) < 0.01f,
-      "18 the walk clamps at -BAL_TRIM_MAX_DEG");
+  chk((out.saturated != 0u) && (alg_bal_trim_deg() > -0.30f),
+      "18 a saturated law freezes the walk short of the clamp");
+
+  /* 18b. and the rate cap keeps one bogus reading from moving it fast: a
+   *      single call may not move the reference by more than 0.01 deg. */
+  {
+    float before;
+    alg_bal_init(&cfg);
+    (void)alg_bal_step(0.0f, 0.0f, 200.0f * RPM2RPS, &out);
+    before = alg_bal_trim_deg();
+    alg_bal_adapt(1.0f);                  /* absurd dt, same as a frozen speed */
+    chk((before - alg_bal_trim_deg()) < 0.011f,
+        "18b the walk rate is capped at 0.01 deg per call");
+  }
 
   /* 19. gate: outside trim_gate_deg the body is still being captured */
   cfg.trim_w_k = 3.0e-4f;

@@ -738,7 +738,7 @@ extern "C" {
  * -> 0 rpm in 17 s with the body moving less than 0.05 deg, k = 1e-3 -> 5 s but
  * 3.11 deg of lean. 3e-4 chosen. 0 freezes the trim and leaves "bal trim" in
  * charge. */
-#define BAL_TRIM_W_K            3.0e-4f
+#define BAL_TRIM_W_K            0.0f     /* off until the guards below are proven on the bench */
 #define BAL_TRIM_GATE_DEG       4.0f    /* outside this the body is still being
                                          * captured; do not lean it further */
 

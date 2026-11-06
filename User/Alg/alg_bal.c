@@ -115,11 +115,15 @@ void alg_bal_reset(void)
   s_phi_deg        = 0.0f;
 }
 
+static float s_trim_rad_prev;
+
 void alg_bal_adapt(float dt_s)
 {
   float lim;
   float gate;
   float rpm;
+
+  s_trim_rad_prev = s_trim_rad;
 
   if ((s_ready == 0u) || (dt_s <= 0.0f))
   {
@@ -141,8 +145,33 @@ void alg_bal_adapt(float dt_s)
   /* In steady state omega_ss = (kp/kw)*(trim - phi_ss): the wheel speed IS the
      zero error. Walking the trim against the wheel makes that error vanish, and
      the walk stops by itself when the wheel stops. */
+  if (s_out.saturated != 0u)
+  {
+    /* A saturated law is already losing the fight; moving the reference while
+       the torque sits at the ceiling just adds a second runaway term.  Bench
+       2026-11-06: with this missing the walk reached its clamp in ~10 s and the
+       body fell shortly after. */
+    return;
+  }
+
   rpm = s_out.omega_rps * 9.5492966f;
   s_trim_rad -= (s_cfg.trim_w_k * rpm * 0.01745329252f) * dt_s;
+
+  /* Hard rate cap: a bogus wheel reading must not be able to ram the reference
+     into its clamp inside a second (0.01 deg per call at 200 Hz = 2 deg/s). */
+  {
+    float step = s_trim_rad - s_trim_rad_prev;
+    const float max_step = 0.01f * 0.01745329252f;
+    if (step > max_step)
+    {
+      s_trim_rad = s_trim_rad_prev + max_step;
+    }
+    else if (step < -max_step)
+    {
+      s_trim_rad = s_trim_rad_prev - max_step;
+    }
+    s_trim_rad_prev = s_trim_rad;
+  }
 
   lim = s_cfg.trim_clamp_deg * 0.01745329252f;
   if (lim > 0.0f)
