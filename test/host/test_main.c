@@ -992,6 +992,32 @@ static void enc_build_frame_at(uint16_t d, uint8_t mg, uint8_t off)
     fake_ssi_frame[3] = (uint8_t)(w32 & 0xFFu);
 }
 
+/* The MT6701 shifts out 24 data bits and then 8 idle bits, so a reader that
+ * slipped by a whole byte sees the same stream rotated, not shifted: the first
+ * byte comes back around at the end. This is the slip the hardware showed as
+ * "60 2e ff 7d" after a good "7d 60 2e ff" (docs/00 #054). */
+static void enc_build_frame_rot(uint16_t d, uint8_t mg, uint8_t idle)
+{
+    uint32_t bits = (((uint32_t)d & 0x3FFFu) << 4) | ((uint32_t)mg & 0x0Fu);
+    uint8_t  crc  = mid_enc_crc6(bits);
+    uint32_t w    = (bits << 6) | (uint32_t)(crc & 0x3Fu);
+    uint8_t  b0   = (uint8_t)((w >> 16) & 0xFFu);
+    uint8_t  b1   = (uint8_t)((w >> 8) & 0xFFu);
+    uint8_t  b2   = (uint8_t)(w & 0xFFu);
+
+    if (idle == 0u) {
+        fake_ssi_frame[0] = b0;
+        fake_ssi_frame[1] = b1;
+        fake_ssi_frame[2] = b2;
+        fake_ssi_frame[3] = 0xFFu;          /* line idles high */
+    } else {
+        fake_ssi_frame[0] = b1;
+        fake_ssi_frame[1] = b2;
+        fake_ssi_frame[2] = 0xFFu;
+        fake_ssi_frame[3] = b0;             /* first byte wrapped around */
+    }
+}
+
 static void test_enc(void)
 {
     const mid_enc_t *e;
@@ -1118,6 +1144,34 @@ static void test_enc(void)
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_info()->raw == 3000u);        /* angle survives the slip */
         T(mid_enc_win() == 8u);                 /* frame sat 8 bits late */
+    }
+    section_end();
+
+    section("enc: a whole-byte rotation is recovered (period-32 stream)");
+    {
+        uint32_t errs_before;
+
+        enc_build_frame(3000u, 0u);
+        mid_enc_update();                       /* seed a valid phase */
+        T(mid_enc_win() == 0u);
+
+        errs_before = mid_enc_info()->crc_errs;
+        enc_build_frame_rot(3000u, 0u, 0u);     /* good frame, 4th byte idle */
+        mid_enc_update();
+        T(mid_enc_info()->crc_ok == 1u);
+        T(mid_enc_info()->raw == 3000u);
+
+        enc_build_frame_rot(3000u, 0u, 1u);     /* next read starts a byte late */
+        mid_enc_update();
+        T(mid_enc_info()->crc_errs == errs_before);
+        T(mid_enc_info()->crc_ok == 1u);
+        T(mid_enc_info()->raw == 3000u);
+        T(mid_enc_win() == 24u);                /* rotated back by one byte */
+
+        enc_build_frame_rot(3000u, 0u, 0u);     /* and straight back to phase 0 */
+        mid_enc_update();
+        T(mid_enc_info()->crc_ok == 1u);
+        T(mid_enc_win() == 0u);
     }
     section_end();
 

@@ -257,16 +257,32 @@ void mid_enc_init(void)
  * is the documented contract (CRC alone), but a window found by searching has
  * to be plausible too - at 20 kHz the wheel cannot move far between frames.
  * */
+/* Bit offsets worth trying, most likely first: whole-byte rotations of the
+ * 32-bit period first (that is the slip actually observed on hardware), then
+ * the fine bit slips up to one byte. */
+static const uint8_t s_cand[17] = {
+    0u, 24u, 25u, 26u, 27u, 28u, 29u, 30u, 31u,
+    1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u
+};
+static uint8_t s_cand_ix;
+
 static uint8_t enc_align(uint32_t w32, uint32_t lim, uint32_t *w_out)
 {
     uint8_t k;
     uint8_t off;
 
-    for (k = 0u; k < 9u; k++) {
+    for (k = 0u; k < 17u; k++) {
         uint32_t win;
 
-        off = (uint8_t)((s_win + k) % 9u);
-        win = (w32 >> (8u - off)) & 0xFFFFFFu;   /* off <= 8, shift 8..0 */
+        off = s_cand[(uint8_t)((s_cand_ix + k) % 17u)];
+        /* The MT6701 shifts out 24 data bits and then 8 idle bits and repeats,
+         * so the next read can start a whole byte later inside that period.
+         * Recovering it needs a ROTATION, not a right shift: the missing bits
+         * come back around the top of the 32-bit word.
+         *   off = 0..8   frame starts inside the first byte
+         *   off = 24..31 the same stream rotated by one byte (8 bits left) */
+        win = (off == 0u) ? (w32 >> 8)
+                          : ((((w32 << off) | (w32 >> (32u - off))) >> 8) & 0xFFFFFFu);
         if (mid_enc_crc6(win >> 6) != (win & 0x3Fu)) {
             continue;
         }
@@ -279,8 +295,9 @@ static uint8_t enc_align(uint32_t w32, uint32_t lim, uint32_t *w_out)
                 continue;                        /* CRC luck, not the frame */
             }
         }
-        s_win  = off;
-        *w_out = win;
+        s_win     = off;
+        s_cand_ix = (uint8_t)((s_cand_ix + k) % 17u);
+        *w_out    = win;
         return 1u;
     }
     return 0u;

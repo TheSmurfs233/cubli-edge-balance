@@ -52,6 +52,8 @@ static volatile uint8_t s_rx[BSP_SSI_FRAME_LEN];
 static volatile uint8_t s_busy;
 static volatile uint32_t s_ovr;   /* SPI RX overruns (a byte was lost) */
 static volatile uint32_t s_resyncs; /* bsp_ssi_resync() calls */
+static volatile uint32_t s_quiet_until; /* DWT tick before which the clock must stay idle */
+static volatile uint8_t  s_quiet_pend;  /* 1 = SPE is off, waiting for the silence to expire */
 static uint8_t  s_stuck;  /* consecutive ISR periods still busy */
 static uint8_t  s_cfg_err; /* DMA channel in code != the one CubeMX configured */
 
@@ -119,6 +121,15 @@ void bsp_ssi_start(void)
 
     if (s_cfg_err != 0u) {
         return;                 /* wrong DMA channel: never touch the bus */
+    }
+
+    if (s_quiet_pend != 0u) {
+        if ((int32_t)(s_quiet_until - bsp_prof_now()) > 0) {
+            return;             /* still inside the forced silence (see resync) */
+        }
+        s_quiet_pend = 0u;
+        SPI1->CR1 |= SPI_CR1_SPE;
+        ssi_flush_rx();
     }
 
     if (s_busy != 0u) {
@@ -221,17 +232,6 @@ void bsp_ssi_abort(void)
 
 /* Busy-wait for a fixed time. The guard keeps a stalled DWT (CYCCNT not
  * running) from hanging the control loop. */
-static void ssi_quiet_us(uint32_t us)
-{
-    uint32_t t0    = bsp_prof_now();
-    uint32_t want  = us * PHASE_CYC_PER_US;
-    uint32_t guard = 0u;
-
-    while (((uint32_t)(bsp_prof_now() - t0) < want) && (guard < (4u * SYS_CORE_CLK_HZ / 1000u))) {
-        guard++;
-    }
-}
-
 void bsp_ssi_resync(void)
 {
     if (s_cfg_err != 0u) {
@@ -239,19 +239,25 @@ void bsp_ssi_resync(void)
     }
 
     /* Release the slave first: the MT6701 only realigns its frame counter when
-     * it sees the clock line idle, not merely a gap between two bursts. */
+     * it sees the clock line idle, not merely a gap between two bursts.
+     *
+     * The silence is NOT spun out here. This function is reached from the
+     * 20 kHz control interrupt (via mid_enc_update), and blocking it for
+     * 2.5 ms starves the current loop (measured: enc slot 109 us average,
+     * 2514 us worst case). Instead the bus is parked and bsp_ssi_start()
+     * refuses to arm frames until the deadline has passed, so the interrupt
+     * only sees one extra compare per call. */
     CSN_GPIO_Port->BSRR = CSN_Pin;
     SPI1->CR2   &= ~SPI_CR2_RXDMAEN;
     SSI_DMA->CCR &= ~DMA_CCR_EN;
 
-    ssi_quiet_us(SSI_RESYNC_QUIET_US);
+    s_quiet_until = bsp_prof_now() + (SSI_RESYNC_QUIET_US * PHASE_CYC_PER_US);
+    s_quiet_pend  = 1u;
 
     /* A half-shifted frame also leaves the SPI shift register mid-byte. Toggling
-     * SPE throws that state away; the second flush clears the RXFIFO/OVR that
-     * disabling the peripheral can leave behind. */
+     * SPE throws that state away; bsp_ssi_start() flushes the RXFIFO/OVR again
+     * when it turns the peripheral back on. */
     SPI1->CR1 &= ~SPI_CR1_SPE;
-    ssi_flush_rx();
-    SPI1->CR1 |= SPI_CR1_SPE;
     ssi_flush_rx();
 
     s_busy   = 0u;
@@ -270,6 +276,11 @@ uint8_t bsp_ssi_read(uint8_t frame[BSP_SSI_FRAME_LEN])
 
     bsp_ssi_abort();                        /* drop anything left over */
     bsp_ssi_start();
+    while ((bsp_ssi_busy() == 0u) && (spin < 4000000u)) {
+        spin++;                             /* waits out a resync silence */
+        bsp_ssi_start();
+    }
+    spin = 0u;
     while ((bsp_ssi_poll(frame) == 0u) && (spin < 500000u)) {
         spin++;
     }
