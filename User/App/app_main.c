@@ -1989,6 +1989,8 @@ static void task_foc(uint32_t t_pick)
                                "(enc on to re-enable)");
                     return;
                 }
+                log_printf("fault: encoder stuck, %u calls without a new frame",
+                           (unsigned)s_prot_enc_cnt);
                 app_fault_raise((uint8_t)APP_FAULT_ENCODER, 0.0f);
                 return;
             }
@@ -2017,6 +2019,8 @@ static void task_foc(uint32_t t_pick)
                                "(enc on to re-enable)");
                     return;
                 }
+                log_printf("fault: encoder reading zero, %u frames",
+                           (unsigned)s_prot_enc_zero_cnt);
                 app_fault_raise((uint8_t)APP_FAULT_ENCODER, 0.0f);
                 return;
             }
@@ -2036,6 +2040,9 @@ static void task_foc(uint32_t t_pick)
                 s_prot_enc_crc_cnt++;
             }
             if (s_prot_enc_crc_cnt >= (uint16_t)PROT_ENC_BAD_FRAMES) {
+                log_printf("fault: encoder crc, %u bad frames in a row, raw %u win %u",
+                           (unsigned)s_prot_enc_crc_cnt,
+                           (unsigned)e->raw, (unsigned)mid_enc_win());
                 app_fault_raise((uint8_t)APP_FAULT_ENCODER, (float)s_prot_enc_crc_cnt);
                 return;
             }

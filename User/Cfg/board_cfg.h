@@ -159,7 +159,10 @@ extern "C" {
  * tau = 1/(2*pi*fc) with k = 0.01 at 1 kHz is about 100 ms. */
 #define PROT_STALL_LP_K         0.01f
 #define PROT_VBUS_MS            50u
-#define PROT_ENC_FRAMES         20u
+/* 100 ISR periods = 5 ms at 20 kHz. 20 was too tight: one bit-level
+ * frame slip (which the 32-rotation decoder cannot undo) faulted the
+ * drive 1 ms after start, and the cube fell on every button press. */
+#define PROT_ENC_FRAMES         100u
 /* A disconnected sensor reads raw 0 forever (the all-zero CRC also passes),
  * so a long run of exactly zero is treated as a dead encoder: 200 frames
  * at 20 kHz is 10 ms, far longer than a real 0-degree reading would last. */
@@ -171,7 +174,10 @@ extern "C" {
  * steering on a frozen angle: the current vector lands in the wrong frame and
  * the phase currents run away into the overcurrent trip. Count consecutive
  * bad samples at 1 kHz and fault well before that can matter. */
-#define PROT_ENC_BAD_FRAMES     20u
+/* 200 frames = 10 ms at 20 kHz. mid_enc holds the last good angle while
+ * frames are corrupt, so a 10 ms window is safe; the rotation decoder
+ * made permanent 100 % CRC failure stop being the normal case. */
+#define PROT_ENC_BAD_FRAMES     200u
 #define PROT_GRACE_MS           200u    /* ignore speed/Vbus after start */
 
 /* The cube runs from a 4S LiPo pack (14.1 V measured, 16.8 V full charge),

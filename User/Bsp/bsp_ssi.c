@@ -137,7 +137,11 @@ void bsp_ssi_start(void)
          * collects it long before this, so seeing several ISR periods in a row
          * means the DMA or the frame is wedged: drop it and start over. */
         if (++s_stuck >= SSI_BUSY_LIMIT) {
-            bsp_ssi_abort();
+            /* Do not abort here: raising CSN mid-frame leaves the MT6701
+             * counting inside the frame, and that bit-level slip is exactly
+             * what the rotation decoder cannot undo (docs/00 #055, #057).
+             * Park the bus and give it a clean silence instead. */
+            bsp_ssi_resync();
         }
         return;
     }
