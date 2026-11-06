@@ -34,10 +34,14 @@ extern SPI_HandleTypeDef hspi1;
  * 20 kHz ISR for over a millisecond if the SPI ever stalled. */
 #define SSI_SPIN_LIMIT    128u
 #define SSI_BUSY_LIMIT    4u      /* frames in flight before we force a reset */
+/* bsp_ssi_resync() parks the bus this many NOP iterations (~4 cycles each at
+ * 170 MHz, so 11000 is about 260us) before it restarts the shift engine. */
+#define SSI_RESYNC_QUIET_LOOPS 11000u
 
 static volatile uint8_t s_rx[3];
 static volatile uint8_t s_busy;
 static volatile uint32_t s_ovr;   /* SPI RX overruns (a byte was lost) */
+static volatile uint32_t s_resyncs; /* bsp_ssi_resync() calls */
 static uint8_t  s_stuck;  /* consecutive ISR periods still busy */
 static uint8_t  s_cfg_err; /* DMA channel in code != the one CubeMX configured */
 
@@ -201,6 +205,42 @@ void bsp_ssi_abort(void)
     ssi_flush_rx();                         /* leave no half-frame behind */
     s_busy  = 0u;
     s_stuck = 0u;
+}
+
+void bsp_ssi_resync(void)
+{
+    uint32_t i;
+
+    if (s_cfg_err != 0u) {
+        return;
+    }
+
+    /* Release the slave first: the MT6701 only realigns its frame counter when
+     * it sees the clock line idle, not merely a gap between two bursts. */
+    CSN_GPIO_Port->BSRR = CSN_Pin;
+    SPI1->CR2   &= ~SPI_CR2_RXDMAEN;
+    SSI_DMA->CCR &= ~DMA_CCR_EN;
+
+    for (i = 0u; i < SSI_RESYNC_QUIET_LOOPS; i++) {
+        __NOP();
+    }
+
+    /* A half-shifted frame also leaves the SPI shift register mid-byte. Toggling
+     * SPE throws that state away; the second flush clears the RXFIFO/OVR that
+     * disabling the peripheral can leave behind. */
+    SPI1->CR1 &= ~SPI_CR1_SPE;
+    ssi_flush_rx();
+    SPI1->CR1 |= SPI_CR1_SPE;
+    ssi_flush_rx();
+
+    s_busy   = 0u;
+    s_stuck  = 0u;
+    s_resyncs++;
+}
+
+uint32_t bsp_ssi_resync_count(void)
+{
+    return s_resyncs;
 }
 
 uint8_t bsp_ssi_read(uint8_t frame[3])

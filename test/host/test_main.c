@@ -963,6 +963,7 @@ static void test_adc(void)
 extern uint8_t fake_ssi_frame[3];
 extern uint8_t fake_ssi_fail;
 extern uint8_t fake_ssi_busy;
+extern uint32_t fake_ssi_resyncs;
 
 static void enc_build_frame(uint16_t d, uint8_t mg)
 {
@@ -1028,6 +1029,55 @@ static void test_enc(void)
         T(e->crc_ok == 0u);
         T(e->crc_errs == before + 1u);
         T(e->raw == 1000u);
+    }
+    section_end();
+
+    section("enc: a run of bad frames escalates to a clock-pause resync");
+    {
+        uint8_t k;
+
+        /* One bad frame must only flush (abort); the reader is usually fine
+         * again on the next frame, and a 260us clock pause on every glitch
+         * would cost more than it saves. */
+        fake_ssi_resyncs = 0u;
+        enc_build_frame(1000u, 0u);
+        mid_enc_update();                       /* good frame: run = 0 */
+        T(mid_enc_bad_run() == 0u);
+        for (k = 0u; k < 4u; k++) {
+            enc_build_frame(1001u, 0u);
+            fake_ssi_frame[2] ^= 0x01u;
+            mid_enc_update();
+        }
+        T(mid_enc_bad_run() == 4u);
+        T(fake_ssi_resyncs == 0u);
+
+        /* The fifth failure in a row is the misaligned-reader case: pause the
+         * clock instead of aborting once more (18#L-16). */
+        enc_build_frame(1002u, 0u);
+        fake_ssi_frame[2] ^= 0x01u;
+        mid_enc_update();
+        T(fake_ssi_resyncs == 1u);
+        T(mid_enc_bad_run() == 0u);
+        T(bsp_ssi_resync_count() == 1u);
+
+        /* A good frame clears the run, so two separate glitches do not add up
+         * to a resync. */
+        enc_build_frame(1003u, 0u);
+        mid_enc_update();
+        T(mid_enc_bad_run() == 0u);
+    }
+    section_end();
+
+    section("enc: the last frame is kept for the ssi command");
+    {
+        uint8_t f[3];
+
+        enc_build_frame(4096u, 0u);
+        mid_enc_update();
+        mid_enc_last_frame(f);
+        T(f[0] == fake_ssi_frame[0]);
+        T(f[1] == fake_ssi_frame[1]);
+        T(f[2] == fake_ssi_frame[2]);
     }
     section_end();
 

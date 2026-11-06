@@ -15,6 +15,7 @@ uint8_t  fake_ssi_frame[3];
 uint8_t  fake_ssi_fail;
 uint8_t  fake_ssi_busy;
 uint32_t fake_ssi_reads;
+uint32_t fake_ssi_resyncs;
 
 void bsp_ssi_init(void)
 {
@@ -64,6 +65,17 @@ uint8_t bsp_ssi_busy(void)
 uint32_t bsp_ssi_ovr_count(void)
 {
     return 0u;
+}
+
+void bsp_ssi_resync(void)
+{
+    fake_ssi_resyncs++;
+    fake_ssi_busy = 0u;
+}
+
+uint32_t bsp_ssi_resync_count(void)
+{
+    return fake_ssi_resyncs;
 }
 
 /* The DMA channel / SPI binding is a hardware fact, checked on the target by

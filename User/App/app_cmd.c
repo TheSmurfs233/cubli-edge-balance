@@ -176,6 +176,7 @@ static void print_help(void)
     log_printf(" trig           benchmark the sin/cos back end (LUT or CORDIC)");
     log_printf(" cordic         dump raw CORDIC readback for 4 angles");
     log_printf(" enc [zero [deg]|dir|raw]  angle, zero capture/restore, direction");
+    log_printf(" ssi            last MT6701 frame bytes, CRC and resync counters");
     log_printf(" align [ol]     pull the rotor to a known angle (ol = no encoder needed)");
     log_printf(" obs [on|off|bw|r|l|lpf|comp]  back-EMF observer, shadow mode");
     log_printf(" if <rpm|off|i|acc>  open-loop I/f start (S10.4)");
@@ -265,6 +266,9 @@ static void print_stat(void)
                (unsigned)bsp_sys_fpccr(), (unsigned)bsp_sys_fpcar(),
                (unsigned)app_guard_lspact(),
                (bsp_sys_fpu_eager_get() != 0u) ? "eager" : "lazy");
+    log_printf(" enc      = badrun %u, resync %u, ovr %u",
+               (unsigned)mid_enc_bad_run(), (unsigned)bsp_ssi_resync_count(),
+               (unsigned)bsp_ssi_ovr_count());
     log_printf(" stack    = peak %u B of %u B",
                (unsigned)bsp_stack_peak_bytes(),
                (unsigned)bsp_stack_size_bytes());
@@ -1994,6 +1998,25 @@ static float   s_pll_zeta = PLL_ZETA;
     }
 
     /* ---------------- enc ----------------- */
+    /* ---------------- ssi ---------------- */
+    else if (strcmp(tok[0], "ssi") == 0) {
+        /* Three raw bytes tell a slipped reader apart from real noise: a frame
+         * that is rotated by one byte (or by 16 bits) is obvious in the dump,
+         * while white noise is not. 18#L-16. */
+        const mid_enc_t *e = mid_enc_info();
+        uint8_t f[3];
+
+        mid_enc_last_frame(f);
+        log_printf("---- ssi (MT6701 frame) ----");
+        log_printf(" bytes = %02x %02x %02x", (unsigned)f[0], (unsigned)f[1], (unsigned)f[2]);
+        log_printf(" raw   = %u, mg %u, %s",
+                   (unsigned)e->raw, (unsigned)e->mg,
+                   (e->crc_ok != 0u) ? "crc ok" : "crc BAD");
+        log_printf(" errs  = badrun %u, resync %u, ovr %u, crc %u/%u",
+                   (unsigned)mid_enc_bad_run(), (unsigned)bsp_ssi_resync_count(),
+                   (unsigned)bsp_ssi_ovr_count(),
+                   (unsigned)e->crc_errs, (unsigned)e->frames);
+    }
     else if (strcmp(tok[0], "enc") == 0) {
         /* enc off / enc on: no encoder fitted (sensorless build). */
         if ((n == 2u) && (strcmp(tok[1], "off") == 0)) {

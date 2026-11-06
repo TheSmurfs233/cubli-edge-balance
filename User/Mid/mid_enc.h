@@ -86,6 +86,14 @@ uint8_t mid_enc_set_dir(uint8_t dir);
  * Exposed for the host tests. */
 uint8_t mid_enc_crc6(uint32_t bits18);
 
+/* Consecutive CRC failures since the last good frame. Reaching
+ * ENC_BAD_RUN_RESYNC triggers bsp_ssi_resync() (18#L-16). */
+uint8_t mid_enc_bad_run(void);
+
+/* Raw three bytes of the last collected frame, for the "ssi" command: a frame
+ * that slipped by one byte is obvious in the dump. */
+void mid_enc_last_frame(uint8_t out[3]);
+
 #ifdef __cplusplus
 }
 #endif

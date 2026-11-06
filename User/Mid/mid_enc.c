@@ -46,6 +46,13 @@ static mid_enc_t s_enc;
  * boot. Used to tell "no encoder fitted" (all-zero frames) from "the
  * encoder died" so the former can fall back instead of faulting. */
 static uint8_t   s_raw_seen_ok;
+static uint8_t   s_bad_run;      /* consecutive CRC failures */
+static uint8_t   s_last[3];      /* raw bytes of the last collected frame */
+
+/* Consecutive CRC failures that switch from abort() to resync(). One or two bad
+ * frames are noise; a run means the reader is misaligned and only a long clock
+ * pause brings the MT6701 back (18#L-16, docs/00 #050). */
+#define ENC_BAD_RUN_RESYNC 5u
 static float    s_zero_rad;   /* zero_deg converted once */
 
 /* Speed estimator state (see ENC_SPD_WINDOW_MS) */
@@ -108,6 +115,21 @@ uint8_t mid_enc_crc6(uint32_t bits18)
     crc = s_crc6_tab[crc ^ ((bits18 >> 6) & 0x3Fu)];
     crc = s_crc6_tab[crc ^ (bits18 & 0x3Fu)];
     return crc;
+}
+
+
+uint8_t mid_enc_bad_run(void)
+{
+    return s_bad_run;
+}
+
+void mid_enc_last_frame(uint8_t out[3])
+{
+    if (out != 0) {
+        out[0] = s_last[0];
+        out[1] = s_last[1];
+        out[2] = s_last[2];
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -219,6 +241,9 @@ void mid_enc_update(void)
     }
 
     s_enc.frames++;
+    s_last[0] = f[0];
+    s_last[1] = f[1];
+    s_last[2] = f[2];
 
     w      = ((uint32_t)f[0] << 16) | ((uint32_t)f[1] << 8) | (uint32_t)f[2];
     d      = (uint16_t)((w >> 10) & 0x3FFFu);
@@ -246,10 +271,24 @@ void mid_enc_update(void)
         /* Do not just skip the frame: a corrupt read usually means the reader
          * slipped by a byte, and without a resync every frame after it is
          * misaligned too (18#L-16). Aborting flushes the receive path so the
-         * next frame starts on a byte boundary again. */
-        bsp_ssi_abort();
+         * next frame starts on a byte boundary again.
+         *
+         * abort() alone was enough while the slip happened once, but a frame
+         * dropped mid-shift leaves the MT6701 still counting clock edges, so
+         * the next frame starts inside the old one, fails CRC, is aborted
+         * again, and the reader stays locked out until a long clock silence
+         * (measured 2026-11-07: 100 % CRC error for minutes, cleared only by
+         * turning the wheel half a revolution). A run of failures is that
+         * state, so pause the clock instead of aborting yet again. */
+        if (++s_bad_run >= ENC_BAD_RUN_RESYNC) {
+            s_bad_run = 0u;
+            bsp_ssi_resync();
+        } else {
+            bsp_ssi_abort();
+        }
         return;
     }
+    s_bad_run = 0u;
 
     /* Angle: raw -> mechanical degrees, then remove the zero reference. */
     mech = (float)d * ENC_RAD_PER_LSB;                 /* 0 .. 2pi */

@@ -50,6 +50,15 @@ uint8_t bsp_ssi_cfg_error(void);
 /* Drop any transfer in flight and release CSN (recovery path). */
 void bsp_ssi_abort(void);
 
+/* Heavy recovery: release CSN, hold the clock quiet long enough for the MT6701
+ * to lose sync on the frame, then restart the shift engine. Needed when a
+ * frame slipped by a byte: abort() alone lets the next frame start in the
+ * middle of the previous one (18#L-16, docs/00 #050). Blocking, ~260us. */
+void bsp_ssi_resync(void);
+
+/* How many times bsp_ssi_resync() ran since power on. */
+uint32_t bsp_ssi_resync_count(void);
+
 /* Blocking convenience wrapper (start + spin until done).
  * Returns 0 on success, non-zero if the transfer failed. */
 uint8_t bsp_ssi_read(uint8_t frame[3]);
