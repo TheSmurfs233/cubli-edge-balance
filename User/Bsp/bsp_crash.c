@@ -34,7 +34,9 @@
 #define CRASH_SLOT_R12  13u
 #define CRASH_SLOT_SP   14u
 #define CRASH_SLOT_R4   15u   /* .. 22 = R11 */
-#define CRASH_SLOT_STK0 23u   /* .. 28 = six words above the frame */
+#define CRASH_SLOT_STK0 23u   /* .. 26 = four words above the frame */
+#define CRASH_SLOT_CPACR 27u  /* back again: 17:39 crashed on a VFP insn */
+#define CRASH_SLOT_FPCCR 28u
 #define CRASH_SLOT_ALIAS 29u  /* watched alias word at fault time */
 #define CRASH_SLOT_DMADST 30u /* DMA1 channel 5 CMAR (encoder RX dest) */
 #define CRASH_SLOT_CTX   31u   /* was FPCAR: the lazy-FPU theory is dead */
@@ -159,7 +161,7 @@ void bsp_crash_capture(uint32_t kind)
     /* Six words just above the exception frame are the interrupted frame's own
      * locals: if a stray float write landed in a saved register slot, this
      * window is where it shows up. */
-    for (uint32_t i = 0u; i < 6u; ++i)
+    for (uint32_t i = 0u; i < 4u; ++i)
     {
         crash_store(CRASH_SLOT_STK0 + i, frame[8 + i]);
     }
@@ -169,6 +171,8 @@ void bsp_crash_capture(uint32_t kind)
      * something other than the CPU wrote it, because the DWT comparator saw
      * nothing), and where was the encoder DMA pointed (a wrong CMAR would
      * write frames straight into .data and no CPU watchpoint can see that). */
+    crash_store(CRASH_SLOT_CPACR, SCB->CPACR);
+    crash_store(CRASH_SLOT_FPCCR, FPU->FPCCR);
     crash_store(CRASH_SLOT_ALIAS, crash_alias_value());
     crash_store(CRASH_SLOT_DMADST, (uint32_t)DMA1_Channel5->CMAR);
     crash_store(CRASH_SLOT_CTX, bsp_sys_ctx);
@@ -284,13 +288,13 @@ static void crash_print_block(void)
                    (unsigned)(*crash_slot(CRASH_SLOT_STK0 + 1u)),
                    (unsigned)(*crash_slot(CRASH_SLOT_STK0 + 2u)),
                    (unsigned)(*crash_slot(CRASH_SLOT_STK0 + 3u)));
-        log_printf(" crash stk %x %x",
-                   (unsigned)(*crash_slot(CRASH_SLOT_STK0 + 4u)),
-                   (unsigned)(*crash_slot(CRASH_SLOT_STK0 + 5u)));
         log_printf(" crash snap alias %x dmadst %x ctx %u",
                    (unsigned)(*crash_slot(CRASH_SLOT_ALIAS)),
                    (unsigned)(*crash_slot(CRASH_SLOT_DMADST)),
                    (unsigned)(*crash_slot(CRASH_SLOT_CTX)));
+        log_printf(" crash fpu cpacr %x fpccr %x",
+                   (unsigned)(*crash_slot(CRASH_SLOT_CPACR)),
+                   (unsigned)(*crash_slot(CRASH_SLOT_FPCCR)));
         log_printf(" crash addr bfar %x mmfar %x",
                    (unsigned)(*crash_slot(CRASH_SLOT_BFAR)),
                    (unsigned)(*crash_slot(CRASH_SLOT_MMFAR)));
