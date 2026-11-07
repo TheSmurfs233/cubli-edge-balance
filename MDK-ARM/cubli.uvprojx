@@ -476,6 +476,11 @@
               <FilePath>../User/Bsp/bsp_imu.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_wp.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Bsp/bsp_wp.c</FilePath>
+            </File>
+            <File>
               <FileName>bsp_crash.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Bsp/bsp_crash.c</FilePath>

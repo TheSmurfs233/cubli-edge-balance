@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bsp_crash.h"
+#include "bsp_wp.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -174,7 +175,12 @@ void SVC_Handler(void)
 void DebugMon_Handler(void)
 {
   /* USER CODE BEGIN DebugMonitor_IRQn 0 */
-
+  /* DWT write watchpoint hit: latch r4-r11 first (the hardware frame does not
+   * carry them), then hand the stacked frame to the recorder, which saves PC,
+   * LR, R0-R3 and the value that landed on the watched word. The recorder
+   * disarms the comparator, so a mis-encoded FUNCTION cannot storm. */
+  bsp_crash_save_regs();
+  bsp_wp_on_monitor((const volatile uint32_t *)__get_MSP());
   /* USER CODE END DebugMonitor_IRQn 0 */
   /* USER CODE BEGIN DebugMonitor_IRQn 1 */
 

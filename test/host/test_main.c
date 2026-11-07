@@ -46,6 +46,7 @@
 #include "bsp_uart.h"
 #include "app_main.h"
 #include "app_cmd.h"
+#include "bsp_wp.h"
 #include "bsp_imu.h"
 #include "mid_fdilink.h"
 #include "usart.h"
@@ -1952,6 +1953,25 @@ static void test_cmd(void)
     T(tx_contains("state    = "));
     T(tx_contains("mode     = "));
     T(tx_contains("uart     = rx_drop="));
+    if (g_fails != g_fail_mark) { tx_dump_on_fail(); }
+    section_end();
+
+    section("cmd: wp arms and disarms the alias watchpoint");
+    tx_clear();
+    cmd_feed("wp off\n");
+    T(tx_contains("OK wp off"));
+    T(bsp_wp_armed() == 0u);
+    tx_clear();
+    cmd_feed("wp on\n");
+    T(tx_contains("OK wp armed on "));
+    T(bsp_wp_armed() == 1u);
+    T(bsp_wp_addr() != 0u);
+    tx_clear();
+    cmd_feed("wp\n");
+    T(tx_contains("wp   = hits "));
+    tx_clear();
+    cmd_feed("wp clear\n");
+    T(tx_contains("OK wp cleared"));
     if (g_fails != g_fail_mark) { tx_dump_on_fail(); }
     section_end();
 

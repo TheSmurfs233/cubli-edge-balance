@@ -36,6 +36,7 @@
 #include "bsp_sys.h"
 #include "bsp_uart.h"
 #include "bsp_crash.h"
+#include "bsp_wp.h"
 #include "bsp_stack.h"
 #include "mid_att.h"
 #include "mid_current.h"
@@ -417,6 +418,47 @@ uint32_t app_guard_ptr_fix_count(void)
     return s_ptr_fix;
 }
 
+/* The guard above runs once per call, and the 17:00 crash proved that is not
+ * enough: s_bal_p was read three times in one straight line, the first two
+ * reads good, the third one corrupt. Every use now goes through an accessor
+ * that re-loads the alias and repairs it on the spot, so the window between
+ * the check and the dereference shrinks to a couple of instructions and a
+ * stray write costs one skipped field instead of a bus fault. */
+static app_bal_info_t *bal_p(void)
+{
+    if (s_bal_p != &s_bal)
+    {
+        ++s_ptr_fix;
+        if (s_ptr_fix <= 3u)
+        {
+            log_printf("[GUARD] s_bal_p %x -> %x", (unsigned)(uintptr_t)s_bal_p,
+                       (unsigned)(uintptr_t)&s_bal);
+        }
+        s_bal_p = &s_bal;
+    }
+    return s_bal_p;
+}
+
+static app_bal_run_t *run_p(void)
+{
+    if (s_run_p != &s_run)
+    {
+        ++s_ptr_fix;
+        if (s_ptr_fix <= 3u)
+        {
+            log_printf("[GUARD] s_run_p %x -> %x", (unsigned)(uintptr_t)s_run_p,
+                       (unsigned)(uintptr_t)&s_run);
+        }
+        s_run_p = &s_run;
+    }
+    return s_run_p;
+}
+
+void app_wp_arm(void)
+{
+    bsp_wp_arm((uint32_t)(uintptr_t)&s_bal_p, (uint32_t)(uintptr_t)&s_bal);
+}
+
 void app_guard_att_ptr_bad(uint32_t v)
 {
     ++s_att_ptr_bad;
@@ -452,21 +494,21 @@ void app_bal_update(void)
         app_guard_att_ptr_bad((uint32_t)(uintptr_t)a);
         a = &s_att_safe;
     }
-    s_bal_p->att_valid = a->valid;
-    s_bal_p->phi_deg   = a->theta_deg;
-    s_bal_p->dphi_dps  = a->theta_dot_dps;
-    s_bal_p->omega_rpm = a->wheel_rpm;
+    bal_p()->att_valid = a->valid;
+    bal_p()->phi_deg   = a->theta_deg;
+    bal_p()->dphi_dps  = a->theta_dot_dps;
+    bal_p()->omega_rpm = a->wheel_rpm;
 
     if (a->valid == 0u)
     {
         /* No usable frame: report zero rather than a stale command. */
-        s_bal_p->valid     = 0u;
-        s_bal_p->saturated = 0u;
-        s_bal_p->deadband  = 0u;
-        s_bal_p->tau_mnm   = 0.0f;
-        s_bal_p->tau_kp_mnm = 0.0f;
-        s_bal_p->tau_kd_mnm = 0.0f;
-        s_bal_p->tau_kw_mnm = 0.0f;
+        bal_p()->valid     = 0u;
+        bal_p()->saturated = 0u;
+        bal_p()->deadband  = 0u;
+        bal_p()->tau_mnm   = 0.0f;
+        bal_p()->tau_kp_mnm = 0.0f;
+        bal_p()->tau_kd_mnm = 0.0f;
+        bal_p()->tau_kw_mnm = 0.0f;
         return;
     }
 
@@ -475,7 +517,7 @@ void app_bal_update(void)
     omega_rad = a->wheel_rpm * BAL_RPM2RPS;
 
     /* 2026-11-07: every bench crash faults on the first read after this call
-     * that uses the callee-saved r4, and r4 then holds what used to be &s_bal_p->
+     * that uses the callee-saved r4, and r4 then holds what used to be &bal_p()->
      * r4 has to survive a call under AAPCS, so either the callee or an interrupt
      * taken inside it breaks that promise. Sample r4 either side of the call so
      * a violation becomes a counter instead of a bus fault, and reach the state
@@ -499,23 +541,23 @@ void app_bal_update(void)
      * negative feedback when the body is held still (flat on the desk), so an
      * ungated adaptor wound it to the clamp and then shoved the cube over. */
     if ((s_bal_seq_prev != a->seq) && (s_bal_auto != 0u) &&
-        (s_run_p->engaged != 0u) &&
-        (s_run_p->state == BAL_ST_RUN))
+        (run_p()->engaged != 0u) &&
+        (run_p()->state == BAL_ST_RUN))
     {
         s_bal_seq_prev = a->seq;
         alg_bal_adapt(BAL_FRAME_DT_S);
     }
 
-    s_bal_p->valid       = 1u;
-    s_bal_p->tau_mnm     = o.tau_nm * 1000.0f;
-    s_bal_p->saturated   = o.saturated;
-    s_bal_p->deadband    = o.deadband;
-    s_bal_p->tau_ff_mnm  = o.tau_ff_nm * 1000.0f;
-    s_bal_p->trim_deg    = alg_bal_trim_deg();
-    s_bal_p->tau_kp_mnm  = s_bal_cfg.sign * s_bal_cfg.kp_nm_rad * phi_rad * 1000.0f;
-    s_bal_p->tau_kd_mnm  = s_bal_cfg.sign * s_bal_cfg.kd_nm_rps * dphi_rad * 1000.0f;
-    s_bal_p->tau_kw_mnm  = s_bal_cfg.sign * s_bal_cfg.kw_nm_rps * omega_rad * 1000.0f;
-    s_bal_p->n++;
+    bal_p()->valid       = 1u;
+    bal_p()->tau_mnm     = o.tau_nm * 1000.0f;
+    bal_p()->saturated   = o.saturated;
+    bal_p()->deadband    = o.deadband;
+    bal_p()->tau_ff_mnm  = o.tau_ff_nm * 1000.0f;
+    bal_p()->trim_deg    = alg_bal_trim_deg();
+    bal_p()->tau_kp_mnm  = s_bal_cfg.sign * s_bal_cfg.kp_nm_rad * phi_rad * 1000.0f;
+    bal_p()->tau_kd_mnm  = s_bal_cfg.sign * s_bal_cfg.kd_nm_rps * dphi_rad * 1000.0f;
+    bal_p()->tau_kw_mnm  = s_bal_cfg.sign * s_bal_cfg.kw_nm_rps * omega_rad * 1000.0f;
+    bal_p()->n++;
 }
 
 uint8_t app_bal_set(uint8_t on)
@@ -523,10 +565,10 @@ uint8_t app_bal_set(uint8_t on)
     if (on == 0u)
     {
         s_bal_on      = 0u;
-        s_bal_p->on      = 0u;
-        s_bal_p->valid   = 0u;
-        s_bal_p->tau_mnm = 0.0f;
-        s_bal_p->n       = 0u;
+        bal_p()->on      = 0u;
+        bal_p()->valid   = 0u;
+        bal_p()->tau_mnm = 0.0f;
+        bal_p()->n       = 0u;
         alg_bal_reset();
         return 0u;
     }
@@ -541,8 +583,8 @@ uint8_t app_bal_set(uint8_t on)
     }
 
     s_bal_on = 1u;
-    s_bal_p->on = 1u;
-    s_bal_p->n  = 0u;
+    bal_p()->on = 1u;
+    bal_p()->n  = 0u;
     alg_bal_reset();
     return 0u;
 }
@@ -559,7 +601,7 @@ float app_bal_trim_set(float deg)
     float r = alg_bal_trim_set(deg);
 
     s_bal_auto = 0u;
-    s_bal_p->trim_deg = r;
+    bal_p()->trim_deg = r;
     return r;
 }
 
@@ -567,7 +609,7 @@ void app_bal_trim_learn(float deg)
 {
     /* Used by the one-shot learn at ENGAGE + BAL_LEARN_MS: it sets the trim
      * without disarming the wheel-driven walk. */
-    s_bal_p->trim_deg = alg_bal_trim_set(deg);
+    bal_p()->trim_deg = alg_bal_trim_set(deg);
 }
 
 void app_bal_auto_set(uint8_t on)
@@ -608,7 +650,7 @@ uint8_t app_bal_snap(void)
     {
         return 4u;
     }
-    w = s_bal_p->omega_rpm;
+    w = bal_p()->omega_rpm;
     if (fabsf(w) > 1200.0f)
     {
         /* Above this the reading is more likely wrong than the machine is fast;
@@ -872,7 +914,7 @@ void app_balance_update(void)
     }
 
     app_bal_update();                  /* recompute with this frame */
-    tau = s_bal_p->tau_mnm;
+    tau = bal_p()->tau_mnm;
 
     /* Engage-on-release. While waiting we command nothing: fighting the hand
      * would only spin the wheel (measured 403 rpm in 265 ms). The first frame
@@ -973,7 +1015,7 @@ void app_balance_update(void)
     s_run.state           = (uint8_t)BAL_ST_RUN;
     s_run.tau_applied_mnm = tau;
     s_run.frames++;
-    if (s_bal_p->saturated != 0u)                    { s_run.sat_frames++; }
+    if (bal_p()->saturated != 0u)                    { s_run.sat_frames++; }
     if (fabsf(tau) > s_run.tau_peak_mnm)          { s_run.tau_peak_mnm = fabsf(tau); }
     if (fabsf(a->theta_deg) > s_run.phi_peak_deg) { s_run.phi_peak_deg = fabsf(a->theta_deg); }
     if (fabsf(a->wheel_rpm) > s_run.omega_peak_rpm) { s_run.omega_peak_rpm = fabsf(a->wheel_rpm); }
@@ -986,6 +1028,7 @@ void app_init(void)
     /* Publish the backup domain first: the fault record from the previous run
      * lives there and the banner prints it a few lines further down. */
     bsp_crash_init();
+    app_wp_arm();
     bsp_stack_paint();   /* record how deep the stack ever gets */
 
     /* S10.1: shadow observer. Starts disabled; "obs on" arms it. */
@@ -2944,14 +2987,14 @@ static void guard_check(void)
     s_ring_bad = ring;
 
     bad = 0u;
-    if ((s_bal_p->phi_deg != s_bal_p->phi_deg) || (fabsf(s_bal_p->phi_deg) > 200.0f)) { bad |= 1u; }
-    if (fabsf(s_bal_p->tau_mnm) > 500.0f)                                        { bad |= 2u; }
+    if ((bal_p()->phi_deg != bal_p()->phi_deg) || (fabsf(bal_p()->phi_deg) > 200.0f)) { bad |= 1u; }
+    if (fabsf(bal_p()->tau_mnm) > 500.0f)                                        { bad |= 2u; }
     if (s_run.state > (uint8_t)BAL_ST_TRIP)                                   { bad |= 4u; }
     if (s_run.trip > (uint8_t)BAL_TRIP_HELD)                                { bad |= 8u; }
     if ((bad != 0u) && (s_state_bad == 0u))
     {
         log_printf("[GUARD] balance state corrupt: %x, phi %.2f, tau %.2f, state %u, trip %u",
-                   (unsigned)bad, (double)s_bal_p->phi_deg, (double)s_bal_p->tau_mnm,
+                   (unsigned)bad, (double)bal_p()->phi_deg, (double)bal_p()->tau_mnm,
                    (unsigned)s_run.state, (unsigned)s_run.trip);
     }
     s_state_bad = bad;

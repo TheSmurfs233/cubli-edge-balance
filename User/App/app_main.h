@@ -352,6 +352,9 @@ void app_guard_att_ptr_bad(uint32_t v);
 uint32_t app_guard_att_ptr_count(void);
 uint32_t app_guard_ptr_fix_count(void);
 
+/* Arm the DWT write watchpoint on the balance alias (also done at init). */
+void app_wp_arm(void);
+
 /* How many guard passes saw FPCCR.LSPACT set while normal code was running. */
 uint32_t app_guard_lspact(void);
 /* Evaluate once. Called from app_loop(); also from blocking commands so the

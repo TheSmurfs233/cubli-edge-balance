@@ -16,6 +16,7 @@
 #include "bsp_adc.h"
 #include "bsp_cordic.h"
 #include "bsp_crash.h"
+#include "bsp_wp.h"
 #include "bsp_gpio.h"
 #include "bsp_imu.h"
 #include "bsp_prof.h"
@@ -134,6 +135,7 @@ static void print_help(void)
     log_printf(" stat           runtime status snapshot");
     log_printf(" uart           debug link state: ring, gState, retries");
     log_printf(" crash [clear]  fault record kept in the backup registers");
+    log_printf(" wp [on|off]    DWT write watchpoint on the balance alias");
     log_printf(" fpu            FP lazy-stacking state; 'fpu eager on|off' switches it");
     log_printf(" start          start (select a mode first)");
     log_printf(" stop           stop and shut the bridge down");
@@ -264,6 +266,9 @@ static void print_stat(void)
                (unsigned)app_guard_cpacr_bad(), (unsigned)app_guard_r4_count(),
                (unsigned)app_guard_att_ptr_count(),
                (unsigned)app_guard_ptr_fix_count());
+    log_printf(" wp       = armed %u, addr %x, hits %u, bad %u",
+               (unsigned)bsp_wp_armed(), (unsigned)bsp_wp_addr(),
+               (unsigned)bsp_wp_hits(), (unsigned)bsp_wp_bad());
     log_printf(" fpu      = fpccr %x, fpcar %x, lspact seen %u, save %s",
                (unsigned)bsp_sys_fpccr(), (unsigned)bsp_sys_fpcar(),
                (unsigned)app_guard_lspact(),
@@ -932,7 +937,21 @@ static float   s_pll_zeta = PLL_ZETA;
         print_version();
     }
     /* ---------------- stat ---------------- */
-    else if (strcmp(tok[0], "crash") == 0) {
+    else if (strcmp(tok[0], "wp") == 0) {
+            if ((n > 1) && (strcmp(tok[1], "on") == 0)) {
+                app_wp_arm();
+                log_printf("OK wp armed on %x", (unsigned)bsp_wp_addr());
+            } else if ((n > 1) && (strcmp(tok[1], "off") == 0)) {
+                bsp_wp_disarm();
+                log_printf("OK wp off");
+            } else if ((n > 1) && (strcmp(tok[1], "clear") == 0)) {
+                bsp_wp_clear();
+                log_printf("OK wp cleared");
+            } else {
+                (void)bsp_wp_print();
+            }
+        }
+        else if (strcmp(tok[0], "crash") == 0) {
             if ((n > 1) && (strcmp(tok[1], "clear") == 0)) {
                 bsp_crash_clear();
                 log_printf("OK crash record cleared");
