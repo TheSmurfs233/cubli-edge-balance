@@ -266,6 +266,12 @@ static void print_stat(void)
                (unsigned)app_guard_cpacr_bad(), (unsigned)app_guard_r4_count(),
                (unsigned)app_guard_att_ptr_count(),
                (unsigned)app_guard_ptr_fix_count());
+    log_printf(" ptrs     = ptrfix %u, last bad %x (alias %u) at %u ms",
+               (unsigned)app_guard_ptr_fix_count(),
+               (unsigned)app_guard_ptr_bad_val(),
+               (unsigned)app_guard_ptr_bad_which(),
+               (unsigned)app_guard_ptr_bad_ms());
+
     log_printf(" wp       = armed %u, addr %x, hits %u, bad %u",
                (unsigned)bsp_wp_armed(), (unsigned)bsp_wp_addr(),
                (unsigned)bsp_wp_hits(), (unsigned)bsp_wp_bad());

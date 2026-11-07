@@ -351,6 +351,9 @@ uint32_t app_guard_r4_count(void);
 void app_guard_att_ptr_bad(uint32_t v);
 uint32_t app_guard_att_ptr_count(void);
 uint32_t app_guard_ptr_fix_count(void);
+uint32_t app_guard_ptr_bad_val(void);
+uint32_t app_guard_ptr_bad_which(void);
+uint32_t app_guard_ptr_bad_ms(void);
 
 /* Arm the DWT write watchpoint on the balance alias (also done at init). */
 void app_wp_arm(void);

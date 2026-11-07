@@ -14,6 +14,7 @@
 #include "mid_log.h"
 #include "bsp_stack.h"
 #include "bsp_sys.h"
+#include "bsp_wp.h"
 
 #define CRASH_MAGIC      0x434C4F47u  /* 'CLOG': fresh, not yet shown */
 #define CRASH_MAGIC_SHOWN 0x434C4F52u /* 'CLOR': shown once, still readable */
@@ -34,8 +35,8 @@
 #define CRASH_SLOT_SP   14u
 #define CRASH_SLOT_R4   15u   /* .. 22 = R11 */
 #define CRASH_SLOT_STK0 23u   /* .. 28 = six words above the frame */
-#define CRASH_SLOT_CPACR 29u
-#define CRASH_SLOT_FPCCR 30u
+#define CRASH_SLOT_ALIAS 29u  /* watched alias word at fault time */
+#define CRASH_SLOT_DMADST 30u /* DMA1 channel 5 CMAR (encoder RX dest) */
 #define CRASH_SLOT_CTX   31u   /* was FPCAR: the lazy-FPU theory is dead */
 
 /* Filled by the assembler stub below, consumed by bsp_crash_capture(). It is a
@@ -110,6 +111,20 @@ static const uint32_t *crash_find_frame(const uint32_t *base)
     return base;
 }
 
+/* 0 means "no alias armed", which is also what a zero word would look like; the
+ * console prints it together with ctx, so the two are easy to tell apart. */
+static uint32_t crash_alias_value(void)
+{
+    uint32_t addr = bsp_wp_addr();
+
+    if (addr == 0u)
+    {
+        return 0u;
+    }
+
+    return *(volatile uint32_t *)addr;
+}
+
 void bsp_crash_capture(uint32_t kind)
 {
     const uint32_t *frame;
@@ -149,11 +164,13 @@ void bsp_crash_capture(uint32_t kind)
         crash_store(CRASH_SLOT_STK0 + i, frame[8 + i]);
     }
 
-    /* A VFP instruction raising UsageFault/UNDEFINSTR almost always means the
-     * coprocessor access got switched off under us, or that the lazy FPU
-     * stacking state is inconsistent. Both are visible in these three. */
-    crash_store(CRASH_SLOT_CPACR, SCB->CPACR);
-    crash_store(CRASH_SLOT_FPCCR, FPU->FPCCR);
+    /* Two questions this record has to answer even after a reset:
+     * was the watched alias word already garbage when the fault fired (then
+     * something other than the CPU wrote it, because the DWT comparator saw
+     * nothing), and where was the encoder DMA pointed (a wrong CMAR would
+     * write frames straight into .data and no CPU watchpoint can see that). */
+    crash_store(CRASH_SLOT_ALIAS, crash_alias_value());
+    crash_store(CRASH_SLOT_DMADST, (uint32_t)DMA1_Channel5->CMAR);
     crash_store(CRASH_SLOT_CTX, bsp_sys_ctx);
 
     crash_store(CRASH_SLOT_MAGIC, CRASH_MAGIC);
@@ -270,10 +287,13 @@ static void crash_print_block(void)
         log_printf(" crash stk %x %x",
                    (unsigned)(*crash_slot(CRASH_SLOT_STK0 + 4u)),
                    (unsigned)(*crash_slot(CRASH_SLOT_STK0 + 5u)));
-        log_printf(" crash fpu cpacr %x fpccr %x ctx %u",
-                   (unsigned)(*crash_slot(CRASH_SLOT_CPACR)),
-                   (unsigned)(*crash_slot(CRASH_SLOT_FPCCR)),
+        log_printf(" crash snap alias %x dmadst %x ctx %u",
+                   (unsigned)(*crash_slot(CRASH_SLOT_ALIAS)),
+                   (unsigned)(*crash_slot(CRASH_SLOT_DMADST)),
                    (unsigned)(*crash_slot(CRASH_SLOT_CTX)));
+        log_printf(" crash addr bfar %x mmfar %x",
+                   (unsigned)(*crash_slot(CRASH_SLOT_BFAR)),
+                   (unsigned)(*crash_slot(CRASH_SLOT_MMFAR)));
         log_printf(" crash stack peak %u B of %u B",
                    (unsigned)bsp_stack_peak_bytes(),
                    (unsigned)bsp_stack_size_bytes());

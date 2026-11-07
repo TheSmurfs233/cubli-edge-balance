@@ -389,26 +389,34 @@ static uint32_t s_att_ptr_bad;
  * corrupted word can only cost one skipped write instead of a bus fault. */
 static uint32_t s_ptr_fix;
 
+/* The 17:30 crash put the fault at bal_p+0x26, the LDR that re-reads the alias
+ * right after the repair branch, with r4 corrupted from 0x20000140 to
+ * 0x20100940 while r5/r6/r0 were still correct. The only call between the two
+ * reads on that branch is log_printf, so the repair path must stop logging:
+ * counting and remembering the bad value costs four stores and no register. */
+static volatile uint32_t s_ptr_bad_val;
+static volatile uint32_t s_ptr_bad_which;
+static volatile uint32_t s_ptr_bad_ms;
+
+static void ptr_record(uint32_t which, uint32_t bad)
+{
+    s_ptr_bad_val = bad;
+    s_ptr_bad_which = which;
+    s_ptr_bad_ms = HAL_GetTick();
+}
+
 static void bal_ptr_guard(void)
 {
     if (s_bal_p != &s_bal)
     {
         ++s_ptr_fix;
-        if (s_ptr_fix <= 3u)
-        {
-            log_printf("[GUARD] s_bal_p %x -> %x", (unsigned)(uintptr_t)s_bal_p,
-                       (unsigned)(uintptr_t)&s_bal);
-        }
+        ptr_record(1u, (uint32_t)(uintptr_t)s_bal_p);
         s_bal_p = &s_bal;
     }
     if (s_run_p != &s_run)
     {
         ++s_ptr_fix;
-        if (s_ptr_fix <= 3u)
-        {
-            log_printf("[GUARD] s_run_p %x -> %x", (unsigned)(uintptr_t)s_run_p,
-                       (unsigned)(uintptr_t)&s_run);
-        }
+        ptr_record(2u, (uint32_t)(uintptr_t)s_run_p);
         s_run_p = &s_run;
     }
 }
@@ -416,6 +424,21 @@ static void bal_ptr_guard(void)
 uint32_t app_guard_ptr_fix_count(void)
 {
     return s_ptr_fix;
+}
+
+uint32_t app_guard_ptr_bad_val(void)
+{
+    return s_ptr_bad_val;
+}
+
+uint32_t app_guard_ptr_bad_which(void)
+{
+    return s_ptr_bad_which;
+}
+
+uint32_t app_guard_ptr_bad_ms(void)
+{
+    return s_ptr_bad_ms;
 }
 
 /* The guard above runs once per call, and the 17:00 crash proved that is not
@@ -429,11 +452,7 @@ static app_bal_info_t *bal_p(void)
     if (s_bal_p != &s_bal)
     {
         ++s_ptr_fix;
-        if (s_ptr_fix <= 3u)
-        {
-            log_printf("[GUARD] s_bal_p %x -> %x", (unsigned)(uintptr_t)s_bal_p,
-                       (unsigned)(uintptr_t)&s_bal);
-        }
+        ptr_record(1u, (uint32_t)(uintptr_t)s_bal_p);
         s_bal_p = &s_bal;
     }
     return s_bal_p;
@@ -444,11 +463,7 @@ static app_bal_run_t *run_p(void)
     if (s_run_p != &s_run)
     {
         ++s_ptr_fix;
-        if (s_ptr_fix <= 3u)
-        {
-            log_printf("[GUARD] s_run_p %x -> %x", (unsigned)(uintptr_t)s_run_p,
-                       (unsigned)(uintptr_t)&s_run);
-        }
+        ptr_record(2u, (uint32_t)(uintptr_t)s_run_p);
         s_run_p = &s_run;
     }
     return s_run_p;
