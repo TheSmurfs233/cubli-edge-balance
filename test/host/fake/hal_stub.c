@@ -132,7 +132,13 @@ void fake_flash_read(uint32_t addr, void *dst, uint32_t len)
 }
 void     fake_tick_reset(void)      { s_tick = 0u; }
 void     fake_tick_set(uint32_t ms) { s_tick = ms; }
-void     fake_tick_add(uint32_t ms) { s_tick += ms; }
+void     fake_tick_add(uint32_t ms)
+{
+    /* Real time advances both clocks: the millisecond tick and the DWT cycle
+     * counter the encoder uses to budget how far the rotor can have moved. */
+    s_tick += ms;
+    fake_dwt.CYCCNT += ms * (SYS_CORE_CLK_HZ / 1000u);
+}
 uint32_t fake_tick_get(void)        { return s_tick; }
 
 /* ------------------------------------------------------------------ */

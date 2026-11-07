@@ -17,6 +17,10 @@
   */
 
 #include "mid_enc.h"
+
+/* A slipped frame re-cuts the same word, so its angle may not move more than
+ * this many counts (200 counts = 4.4 deg mechanical). */
+#define ENC_SLIP_TOL   8u
 #include <math.h>
 #include "alg_pll.h"
 #include "board_cfg.h"
@@ -291,7 +295,6 @@ static uint8_t enc_align(uint32_t w32, uint32_t lim, uint32_t *w_out)
 {
     uint8_t k;
     uint8_t off;
-
     for (k = 0u; k < 32u; k++) {
         uint32_t win;
 
@@ -324,12 +327,25 @@ static uint8_t enc_align(uint32_t w32, uint32_t lim, uint32_t *w_out)
          * on tens-of-frames-old rotor position - the motor buzzed and the
          * cube could not be held (measured 2026-11-07). */
         if (s_enc.valid != 0u) {
-            int32_t jd = (int32_t)((win >> 10) & 0x3FFFu) - (int32_t)s_enc.raw;
+            int32_t  jd = (int32_t)((win >> 10) & 0x3FFFu) - (int32_t)s_enc.raw;
+            uint32_t tol;
 
             if (jd >  8192) { jd -= 16384; }
             if (jd < -8192) { jd += 16384; }
-            if ((uint32_t)((jd < 0) ? -jd : jd) > lim) {
-                continue;                        /* CRC luck, not the frame */
+            /* A rotation other than the one already in use can only be a
+             * slipped frame, and a slip does not move the angle at all: it
+             * re-cuts the same 24-bit word. So a non-cached rotation gets a
+             * tight tolerance, while the rotation in use keeps the full
+             * travel budget. Without this a CRC-lucky candidate can win as
+             * soon as the elapsed time makes lim wide (measured: after a 5 ms
+             * gap the decoder took a frame 45 deg away). */
+            {
+                uint32_t d2 = (uint32_t)((jd < 0) ? -jd : jd);
+
+                tol = (off == s_win) ? lim : (uint32_t)ENC_SLIP_TOL;
+                if (d2 > tol) {
+                    continue;                    /* CRC luck, not the frame */
+                }
             }
         }
         s_win     = off;
@@ -337,6 +353,7 @@ static uint8_t enc_align(uint32_t w32, uint32_t lim, uint32_t *w_out)
         *w_out    = win;
         return 1u;
     }
+
     return 0u;
 }
 
@@ -429,8 +446,14 @@ void mid_enc_update(void)
          * state, so pause the clock instead of aborting yet again. */
         s_enc.crc_ok = 0u;
         s_enc.crc_errs++;
-        s_enc.raw = (uint16_t)((w32 >> 18) & 0x3FFFu);
-        s_enc.mg  = (uint8_t)((w32 >> 14) & 0x0Fu);
+        /* Do NOT touch s_enc.raw here. It is the reference the plausibility
+         * gate measures the next frame against; a corrupt word would move the
+         * reference to a random angle, so every later good frame looks like a
+         * CRC-lucky jump and gets rejected too. That latched the reader out
+         * completely and the FOC steered on a frozen angle until the phase
+         * currents tripped the overcurrent guard (measured 2026-11-07). The
+         * raw bytes of the rejected frame stay readable through
+         * mid_enc_last_frame() for diagnosis. */
         if (bsp_ssi_busy() != 0u) {
             /* Another caller already armed the next frame. Aborting or
              * resyncing now would cut it mid-shift and make the next read
@@ -654,15 +677,45 @@ void mid_enc_clear_errs(void)
 
 uint8_t mid_enc_zero(void)
 {
-    uint8_t f[3];
-    uint32_t w;
+    uint8_t  f[BSP_SSI_FRAME_LEN];
+    uint32_t w32;
+    uint32_t w = 0u;
     uint16_t d;
+    uint8_t  a;
+    uint8_t  found = 0u;
 
     if (bsp_ssi_read(f) != 0u) {
         return 1u;
     }
 
-    w = ((uint32_t)f[0] << 16) | ((uint32_t)f[1] << 8) | (uint32_t)f[2];
+    /* The read returns FOUR bytes (one word of slack for a slipped phase),
+     * so a 3-byte local here overflowed the stack by one byte and the captured
+     * zero depended on whatever the compiler happened to place next. Decode it
+     * exactly like mid_enc_update() does instead: try the 32 rotations and use
+     * the one whose CRC6 checks out. */
+    w32 = ((uint32_t)f[0] << 24) | ((uint32_t)f[1] << 16) |
+          ((uint32_t)f[2] << 8)  |  (uint32_t)f[3];
+    /* Try the rotation the reader is already on first: at 32 rotations a
+     * CRC6 false hit turns up in roughly one read in 64, and taking that one
+     * would capture a zero that is not where the rotor is. */
+    for (a = 0u; a < 32u; a++) {
+        uint8_t  rot = (a == 0u) ? s_win : (uint8_t)(a - 1u);
+        uint32_t win;
+
+        if ((a != 0u) && (rot == s_win)) {
+            continue;                       /* already tried as the cached one */
+        }
+        win = (rot == 0u) ? (w32 >> 8)
+              : ((((w32 << rot) | (w32 >> (32u - rot))) >> 8) & 0xFFFFFFu);
+        if (mid_enc_crc6(win >> 6) == (win & 0x3Fu)) {
+            w     = win;
+            found = 1u;
+            break;
+        }
+    }
+    if (found == 0u) {
+        return 1u;                      /* nothing decodeable: keep the old zero */
+    }
     d = (uint16_t)((w >> 10) & 0x3FFFu);
 
     s_enc.zero_deg = (float)d * ENC_RAD_PER_LSB * ENC_RAD_TO_DEG;

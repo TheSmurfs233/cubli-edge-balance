@@ -1062,6 +1062,7 @@ static void test_enc(void)
     section_end();
 
     section("enc: magnetic status is decoded");
+    enc_tick_us(20000u);                        /* a new scenario: 20 ms later */
     enc_build_frame(100u, 2u);                  /* field too weak */
     mid_enc_update();
     T(mid_enc_info()->mg == 2u);
@@ -1069,8 +1070,12 @@ static void test_enc(void)
 
     section("enc: a corrupted CRC is counted but the angle is kept");
     {
-        uint32_t before = mid_enc_info()->crc_errs;
+        uint32_t before;
 
+        enc_tick_us(20000u);
+        enc_build_frame(1000u, 0u);
+        mid_enc_update();                       /* good frame: raw = 1000 */
+        before = mid_enc_info()->crc_errs;
         enc_build_frame(1000u, 0u);
         fake_ssi_frame[2] ^= 0x01u;             /* flip a CRC bit */
         mid_enc_update();
@@ -1101,6 +1106,15 @@ static void test_enc(void)
         }
         T(mid_enc_bad_run() == 8u);
         T(fake_ssi_resyncs == 0u);              /* no park, no abort */
+        /* The rejected bursts must not have moved the plausibility reference:
+         * a good frame 20 counts further on is still accepted. */
+        T(mid_enc_info()->raw == 1000u);
+        enc_tick_us(100u);
+        enc_build_frame(1020u, 0u);
+        mid_enc_update();
+        T(mid_enc_info()->crc_ok == 1u);
+        T(mid_enc_info()->raw == 1020u);
+        T(mid_enc_bad_run() == 0u);
         T(bsp_ssi_resync_count() == 0u);
 
         /* A good frame clears the run. */
@@ -1115,6 +1129,7 @@ static void test_enc(void)
     {
         uint8_t f[4];
 
+        enc_tick_us(20000u);
         enc_build_frame(4096u, 0u);
         mid_enc_update();
         mid_enc_last_frame(f);
@@ -1130,6 +1145,7 @@ static void test_enc(void)
     {
         uint32_t before;
 
+        enc_tick_us(20000u);
         enc_build_frame(3000u, 0u);
         mid_enc_update();                       /* good frame at phase 0 */
         T(mid_enc_win() == 0u);
@@ -1152,6 +1168,7 @@ static void test_enc(void)
     {
         uint32_t errs_before;
 
+        enc_tick_us(60u);                       /* same angle, one frame on */
         enc_build_frame(3000u, 0u);
         mid_enc_update();                       /* seed a valid phase */
         T(mid_enc_win() == 0u);
@@ -1244,6 +1261,7 @@ static void test_enc(void)
         float    mech_before;
         uint32_t errs_before;
 
+        enc_tick_us(20000u);
         enc_build_frame(3000u, 0u);
         mid_enc_update();
         mech_before = mid_enc_info()->mech_deg;
@@ -1386,6 +1404,7 @@ static void test_enc(void)
     }
 
     section("enc: zero capture makes the current position 0 deg");
+    enc_tick_us(8000u);                         /* new scenario, 45 deg away */
     enc_build_frame(2048u, 0u);                 /* 45 deg */
     mid_enc_update();
     T(mid_enc_zero() == 0u);
