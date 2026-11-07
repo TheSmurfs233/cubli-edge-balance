@@ -63,15 +63,19 @@ static uint32_t  s_t_enc;        /* timestamp of the last accepted frame   */
  * the recovery in bsp_ssi_start(). */
 #define ENC_LATE_RESYNC    20u
 
-/* How many raw LSB (16384 per turn) the wheel can cover in one millisecond at
- * the mechanical ceiling of this machine, ~2000 rpm = 50.5 LSB/ms. Used to
- * reject frames that a bit-shifted search "recovered" only by CRC luck. */
-/* Encoder counts the rotor can cover per millisecond; the plausibility gate
- * allows this much movement plus a fixed slack. 55 used to be here, which is
- * only 200 rpm: above that a CORRECT frame that arrived at a new rotation was
- * thrown away as implausible. 700 covers 2200 rpm (601 counts/ms) with margin
- * and still refuses a full-turn jump (16384 counts, 23 ms of travel). */
-#define ENC_LSB_PER_MS     700u
+/* How many raw LSB (16384 per turn) the wheel can cover per microsecond, times
+ * ten so the limit stays integer maths: 7 is 0.7 LSB/us, i.e. 2560 rpm. The
+ * age MUST be scaled in microseconds. It used to be
+ *     lim = SLACK + ((now - t_last) / 1000u) * 700u
+ * which divides a cycle count by 1000 (that is kHz, not ms) and, with the
+ * encoder read every 100 us, rounded to zero: only the 20-count slack was
+ * left. Everything above ~730 rpm then looked implausible, the angle froze,
+ * the FOC vector starved, the speed loop saturated and the ripple tripped the
+ * over-current guard (measured 2026-11-07: "spd 300" crawled to 108 rpm and
+ * tripped at 1.31 A). */
+#define ENC_LSB_PER_US_X10 10u
+/* Age stops growing here, so a long stall cannot widen the window. */
+#define ENC_AGE_CAP_US     20000u
 /* Counts of slack on top of the travel estimate (0.12 %% of a turn). */
 #define ENC_ALIGN_SLACK    20u
 static float    s_zero_rad;   /* zero_deg converted once */
@@ -401,7 +405,15 @@ void mid_enc_update(void)
      * of a turn, so a CRC6 false hit (1 in 64, times 32 rotations) almost
      * never lands that close to the previous angle. The old 100-count
      * slack let about one frame in a thousand through to a wrong angle. */
-    lim = ENC_ALIGN_SLACK + (uint32_t)(((bsp_prof_now() - s_t_enc) / 1000u) * ENC_LSB_PER_MS);
+    {
+        uint32_t age_us;
+
+        age_us = (uint32_t)((bsp_prof_now() - s_t_enc) / PHASE_CYC_PER_US);
+        if (age_us > ENC_AGE_CAP_US) {
+            age_us = ENC_AGE_CAP_US;
+        }
+        lim = ENC_ALIGN_SLACK + (age_us * ENC_LSB_PER_US_X10) / 10u;
+    }
     if (enc_align(w32, lim, &w) == 0u) {
         /* Do not just skip the frame: a corrupt read usually means the reader
          * slipped by a byte, and without a resync every frame after it is

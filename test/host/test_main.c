@@ -1332,7 +1332,10 @@ static void test_enc(void)
 
         enc_tick_us(10000u);
         for (i = 0u; i < 15u; i++) {
-            enc_tick_us(1000u);                 /* 1 ms between frames */
+            /* The 15 frames were logged at different moments, not as a
+             * 1 kHz stream: the largest step is 6125 counts, so give the
+             * plausibility gate 10 ms of travel (10020 counts). */
+            enc_tick_us(10000u);
             fake_ssi_frame[0] = raw[i][0];
             fake_ssi_frame[1] = raw[i][1];
             fake_ssi_frame[2] = raw[i][2];
@@ -1345,6 +1348,43 @@ static void test_enc(void)
         T(bad == 0u);
     }
     section_end();
+    section("enc: 1900 rpm is inside the plausibility window");
+    {
+        /* 1900 rpm is 52 counts per 100 us (10 kHz encoder rate). The gate
+         * used to allow only 20 counts, so every genuine frame above ~730 rpm
+         * was thrown away and the angle froze: this is the regression that
+         * made "spd 300" crawl and then trip on over-current. */
+        uint16_t d = 8000u;
+        uint8_t  i;
+        uint8_t  bad = 0u;
+        float    mech;
+
+        enc_tick_us(10000u);
+        enc_build_frame(d, 0u);
+        mid_enc_update();
+        T(mid_enc_info()->crc_ok == 1u);
+
+        for (i = 0u; i < 20u; i++) {
+            enc_tick_us(100u);                  /* 10 kHz reads */
+            d = (uint16_t)(d + 52u);
+            enc_build_frame(d, 0u);
+            mid_enc_update();
+            if (mid_enc_info()->crc_ok == 0u) {
+                bad++;
+            }
+        }
+        T(bad == 0u);
+        mech = mid_enc_info()->mech_deg;
+        T(mid_enc_info()->raw == d);
+
+        /* The gate still has teeth: a 2000-count jump in 100 us is 73 krpm. */
+        enc_tick_us(100u);
+        enc_build_frame((uint16_t)(d + 2000u), 0u);
+        mid_enc_update();
+        T(mid_enc_info()->crc_ok == 0u);
+        T(fabsf(mid_enc_info()->mech_deg - mech) < 0.001f);
+    }
+
     section("enc: zero capture makes the current position 0 deg");
     enc_build_frame(2048u, 0u);                 /* 45 deg */
     mid_enc_update();
