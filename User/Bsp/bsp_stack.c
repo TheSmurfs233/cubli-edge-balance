@@ -55,6 +55,47 @@ void bsp_stack_paint(void)
     }
 }
 
+static uint32_t s_sp_lo_seen = 0xFFFFFFFFu;
+static uint32_t s_sp_hi_seen;
+static uint32_t s_sp_bad;
+
+uint32_t bsp_stack_sp(void)
+{
+    return (uint32_t)__current_sp();
+}
+
+uint8_t bsp_stack_sp_check(void)
+{
+    uint32_t sp  = (uint32_t)__current_sp();
+    uint32_t top = stack_top();
+    uint32_t lo  = top - BSP_STACK_SIZE;
+
+    if (sp < s_sp_lo_seen) { s_sp_lo_seen = sp; }
+    if (sp > s_sp_hi_seen) { s_sp_hi_seen = sp; }
+
+    if ((sp < (lo + BSP_STACK_GUARD)) || (sp > top))
+    {
+        ++s_sp_bad;
+        return 0u;
+    }
+    return 1u;
+}
+
+uint32_t bsp_stack_sp_bads(void)
+{
+    return s_sp_bad;
+}
+
+uint32_t bsp_stack_sp_lo(void)
+{
+    return s_sp_lo_seen;
+}
+
+uint32_t bsp_stack_sp_hi(void)
+{
+    return s_sp_hi_seen;
+}
+
 uint32_t bsp_stack_peak_bytes(void)
 {
     uint32_t top = stack_top();

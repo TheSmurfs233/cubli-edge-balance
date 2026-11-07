@@ -18,3 +18,30 @@ uint32_t bsp_stack_size_bytes(void)
 {
     return 2048u;
 }
+
+static uint32_t fake_sp_bad;
+
+uint32_t bsp_stack_sp(void)
+{
+    return 0x20003A00u;
+}
+
+uint8_t bsp_stack_sp_check(void)
+{
+    return (fake_sp_bad == 0u) ? 1u : 0u;
+}
+
+uint32_t bsp_stack_sp_bads(void)
+{
+    return fake_sp_bad;
+}
+
+uint32_t bsp_stack_sp_lo(void)
+{
+    return 0x20003600u;
+}
+
+uint32_t bsp_stack_sp_hi(void)
+{
+    return 0x20003A00u;
+}

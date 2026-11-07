@@ -285,6 +285,9 @@ static void print_stat(void)
                (unsigned)mid_enc_bad_run(), (unsigned)bsp_ssi_resync_count(),
                (unsigned)bsp_ssi_resync_busy_count(),
                (unsigned)bsp_ssi_ovr_count());
+    log_printf(" sp       = %x..%x, bad %u",
+               (unsigned)bsp_stack_sp_lo(), (unsigned)bsp_stack_sp_hi(),
+               (unsigned)app_guard_sp_bad());
     log_printf(" stack    = peak %u B of %u B",
                (unsigned)bsp_stack_peak_bytes(),
                (unsigned)bsp_stack_size_bytes());

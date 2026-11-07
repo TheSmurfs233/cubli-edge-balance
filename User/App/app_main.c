@@ -2978,6 +2978,7 @@ const app_status_t *app_status(void)
  * instead of finding the corpse afterwards, so this runs every 256 loops,
  * logs the first few events and restores the enable bits. */
 static uint32_t s_cpacr_bad;
+static uint32_t s_sp_bad;
 static uint32_t s_lspact_seen;
 static uint32_t s_ring_bad;
 static uint32_t s_state_bad;
@@ -2985,6 +2986,14 @@ static uint32_t s_r4_bad;
 
 static void guard_check(void)
 {
+    if (bsp_stack_sp_check() == 0u)
+    {
+        ++s_sp_bad;
+        if (s_sp_bad <= 3u)
+        {
+            log_printf("[GUARD] sp out of window: %x", (unsigned)bsp_stack_sp());
+        }
+    }
     uint32_t cpacr;
     uint32_t ring;
     uint32_t bad;
@@ -3075,6 +3084,11 @@ uint32_t app_guard_state_bad(void)
 uint32_t app_guard_cpacr_bad(void)
 {
     return s_cpacr_bad;
+}
+
+uint32_t app_guard_sp_bad(void)
+{
+    return s_sp_bad;
 }
 
 uint32_t app_guard_lspact(void)
