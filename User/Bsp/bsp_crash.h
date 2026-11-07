@@ -48,3 +48,9 @@ uint8_t bsp_crash_print_saved(void);
 void bsp_crash_clear(void);
 
 #endif
+
+/* Flash integrity baseline (see bsp_img.h). The marker keeps a slot left over
+ * from an older firmware from being mistaken for a real baseline. */
+#define CRASH_IMGCRC_MARK 0x494D4743u   /* 'IMGC' */
+void bsp_crash_save_crc(uint32_t crc);
+uint8_t bsp_crash_load_crc(uint32_t *crc);

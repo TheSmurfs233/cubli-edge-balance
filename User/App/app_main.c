@@ -407,17 +407,24 @@ static void ptr_record(uint32_t which, uint32_t bad)
 
 static void bal_ptr_guard(void)
 {
-    if (s_bal_p != &s_bal)
+    app_bal_info_t *bp = s_bal_p;
+
+    if (bp != &s_bal)
     {
         ++s_ptr_fix;
-        ptr_record(1u, (uint32_t)(uintptr_t)s_bal_p);
+        ptr_record(1u, (uint32_t)(uintptr_t)bp);
         s_bal_p = &s_bal;
     }
-    if (s_run_p != &s_run)
+
     {
-        ++s_ptr_fix;
-        ptr_record(2u, (uint32_t)(uintptr_t)s_run_p);
-        s_run_p = &s_run;
+        app_bal_run_t *rp = s_run_p;
+
+        if (rp != &s_run)
+        {
+            ++s_ptr_fix;
+            ptr_record(2u, (uint32_t)(uintptr_t)rp);
+            s_run_p = &s_run;
+        }
     }
 }
 
@@ -449,24 +456,30 @@ uint32_t app_guard_ptr_bad_ms(void)
  * stray write costs one skipped field instead of a bus fault. */
 static app_bal_info_t *bal_p(void)
 {
-    if (s_bal_p != &s_bal)
+    app_bal_info_t *p = s_bal_p;
+
+    if (p != &s_bal)
     {
         ++s_ptr_fix;
-        ptr_record(1u, (uint32_t)(uintptr_t)s_bal_p);
+        ptr_record(1u, (uint32_t)(uintptr_t)p);
         s_bal_p = &s_bal;
+        p = &s_bal;
     }
-    return s_bal_p;
+    return p;
 }
 
 static app_bal_run_t *run_p(void)
 {
-    if (s_run_p != &s_run)
+    app_bal_run_t *p = s_run_p;
+
+    if (p != &s_run)
     {
         ++s_ptr_fix;
-        ptr_record(2u, (uint32_t)(uintptr_t)s_run_p);
+        ptr_record(2u, (uint32_t)(uintptr_t)p);
         s_run_p = &s_run;
+        p = &s_run;
     }
-    return s_run_p;
+    return p;
 }
 
 void app_wp_arm(void)

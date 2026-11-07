@@ -34,7 +34,9 @@
 #define CRASH_SLOT_R12  13u
 #define CRASH_SLOT_SP   14u
 #define CRASH_SLOT_R4   15u   /* .. 22 = R11 */
-#define CRASH_SLOT_STK0 23u   /* .. 26 = four words above the frame */
+#define CRASH_SLOT_STK0 23u   /* .. 24 = two words above the frame */
+#define CRASH_SLOT_IMGCRC 25u /* flash CRC saved by 'crc save' */
+#define CRASH_SLOT_IMGCK 26u  /* marker so a stale CRC is not trusted */
 #define CRASH_SLOT_CPACR 27u  /* back again: 17:39 crashed on a VFP insn */
 #define CRASH_SLOT_FPCCR 28u
 #define CRASH_SLOT_ALIAS 29u  /* watched alias word at fault time */
@@ -161,7 +163,7 @@ void bsp_crash_capture(uint32_t kind)
     /* Six words just above the exception frame are the interrupted frame's own
      * locals: if a stray float write landed in a saved register slot, this
      * window is where it shows up. */
-    for (uint32_t i = 0u; i < 4u; ++i)
+    for (uint32_t i = 0u; i < 2u; ++i)
     {
         crash_store(CRASH_SLOT_STK0 + i, frame[8 + i]);
     }
@@ -283,11 +285,9 @@ static void crash_print_block(void)
                    (unsigned)(*crash_slot(CRASH_SLOT_R4 + 5u)),
                    (unsigned)(*crash_slot(CRASH_SLOT_R4 + 6u)),
                    (unsigned)(*crash_slot(CRASH_SLOT_R4 + 7u)));
-        log_printf(" crash stk %x %x %x %x",
+        log_printf(" crash stk %x %x",
                    (unsigned)(*crash_slot(CRASH_SLOT_STK0)),
-                   (unsigned)(*crash_slot(CRASH_SLOT_STK0 + 1u)),
-                   (unsigned)(*crash_slot(CRASH_SLOT_STK0 + 2u)),
-                   (unsigned)(*crash_slot(CRASH_SLOT_STK0 + 3u)));
+                   (unsigned)(*crash_slot(CRASH_SLOT_STK0 + 1u)));
         log_printf(" crash snap alias %x dmadst %x ctx %u",
                    (unsigned)(*crash_slot(CRASH_SLOT_ALIAS)),
                    (unsigned)(*crash_slot(CRASH_SLOT_DMADST)),
@@ -338,4 +338,26 @@ void bsp_crash_report(void)
 
     RCC->CSR |= RCC_CSR_RMVF;
     RCC->CSR &= ~RCC_CSR_RMVF;
+}
+
+/* Flash integrity baseline. 'crc save' stores the CRC of the flashed region in
+ * a backup register pair, so after a reset we can ask whether the array still
+ * holds what was flashed. This is the probe that separates "the flash content
+ * changed" from "the fetch path is being disturbed". */
+
+void bsp_crash_save_crc(uint32_t crc)
+{
+    crash_publish();
+    *crash_slot(CRASH_SLOT_IMGCRC) = crc;
+    *crash_slot(CRASH_SLOT_IMGCK) = CRASH_IMGCRC_MARK;
+}
+
+uint8_t bsp_crash_load_crc(uint32_t *crc)
+{
+    if ((crc == 0) || (*crash_slot(CRASH_SLOT_IMGCK) != CRASH_IMGCRC_MARK))
+    {
+        return 0u;
+    }
+    *crc = *crash_slot(CRASH_SLOT_IMGCRC);
+    return 1u;
 }

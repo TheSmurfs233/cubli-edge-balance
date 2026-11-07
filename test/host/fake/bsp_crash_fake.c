@@ -47,3 +47,22 @@ uint8_t fake_crash_reported(void)
 {
     return s_reported;
 }
+
+static uint32_t s_saved_crc;
+static uint8_t s_have_crc;
+
+void bsp_crash_save_crc(uint32_t crc)
+{
+    s_saved_crc = crc;
+    s_have_crc = 1u;
+}
+
+uint8_t bsp_crash_load_crc(uint32_t *crc)
+{
+    if ((crc == 0) || (s_have_crc == 0u))
+    {
+        return 0u;
+    }
+    *crc = s_saved_crc;
+    return 1u;
+}

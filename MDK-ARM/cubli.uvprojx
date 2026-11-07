@@ -481,6 +481,11 @@
               <FilePath>../User/Bsp/bsp_wp.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_img.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Bsp/bsp_img.c</FilePath>
+            </File>
+            <File>
               <FileName>bsp_crash.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Bsp/bsp_crash.c</FilePath>

@@ -57,6 +57,7 @@ $ROOT/User/Mid/mid_att.c
 $HERE/fake/bsp_crash_fake.c
     $HERE/fake/bsp_stack_fake.c
      $HERE/fake/bsp_wp_fake.c
+     $HERE/fake/bsp_img_fake.c
      $ROOT/User/Bsp/bsp_imu.c
      $ROOT/User/Bsp/bsp_uart.c
      $ROOT/User/App/app_main.c

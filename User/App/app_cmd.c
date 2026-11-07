@@ -16,6 +16,7 @@
 #include "bsp_adc.h"
 #include "bsp_cordic.h"
 #include "bsp_crash.h"
+#include "bsp_img.h"
 #include "bsp_wp.h"
 #include "bsp_gpio.h"
 #include "bsp_imu.h"
@@ -135,6 +136,7 @@ static void print_help(void)
     log_printf(" stat           runtime status snapshot");
     log_printf(" uart           debug link state: ring, gState, retries");
     log_printf(" crash [clear]  fault record kept in the backup registers");
+    log_printf(" crc [save]     flash image CRC (save = store as baseline)");
     log_printf(" wp [on|off]    DWT write watchpoint on the balance alias");
     log_printf(" fpu            FP lazy-stacking state; 'fpu eager on|off' switches it");
     log_printf(" start          start (select a mode first)");
@@ -963,6 +965,23 @@ static float   s_pll_zeta = PLL_ZETA;
                 log_printf("OK crash record cleared");
             } else {
                 (void)bsp_crash_print_saved();
+            }
+        }
+        else if (strcmp(tok[0], "crc") == 0) {
+            uint32_t now = bsp_img_crc();
+            uint32_t base = 0u;
+
+            if ((n > 1) && (strcmp(tok[1], "save") == 0)) {
+                bsp_crash_save_crc(now);
+                log_printf("OK crc baseline saved: %08x", (unsigned)now);
+            } else if (bsp_crash_load_crc(&base) == 0u) {
+                log_printf("crc = %08x now, no baseline yet (crc save)", (unsigned)now);
+            } else if (base == now) {
+                log_printf("crc = %08x now, baseline %08x, MATCH",
+                           (unsigned)now, (unsigned)base);
+            } else {
+                log_printf("crc = %08x now, baseline %08x, CHANGED (flash differs)",
+                           (unsigned)now, (unsigned)base);
             }
         }
         else if (strcmp(tok[0], "fpu") == 0) {
