@@ -260,9 +260,10 @@ static void print_stat(void)
                (unsigned)bsp_uart_rx_drop_count(),
                (unsigned)bsp_uart_tx_pending(),
                (unsigned)bsp_uart_tx_stuck_count());
-    log_printf(" guard    = cpacr repairs %u, r4clob %u, ptrbad %u",
+    log_printf(" guard    = cpacr repairs %u, r4clob %u, ptrbad %u, ptrfix %u",
                (unsigned)app_guard_cpacr_bad(), (unsigned)app_guard_r4_count(),
-               (unsigned)app_guard_att_ptr_count());
+               (unsigned)app_guard_att_ptr_count(),
+               (unsigned)app_guard_ptr_fix_count());
     log_printf(" fpu      = fpccr %x, fpcar %x, lspact seen %u, save %s",
                (unsigned)bsp_sys_fpccr(), (unsigned)bsp_sys_fpcar(),
                (unsigned)app_guard_lspact(),

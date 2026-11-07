@@ -331,7 +331,7 @@ static app_bal_info_t s_bal;
 /* Volatile aliases: reading these forces a reload from memory, so the
  * register the compiler would otherwise keep across a call cannot turn
  * an access into a wild pointer (see app_bal_update()). */
-static app_bal_info_t *const volatile s_bal_p = &s_bal;
+static app_bal_info_t *volatile s_bal_p = &s_bal;
 static uint8_t        s_bal_on;
 static uint32_t       s_bal_seq_prev;   /* attitude frame seen by the last update */
 static uint8_t        s_bal_auto = 1u;  /* whether the wheel may walk the trim  */
@@ -372,13 +372,50 @@ static void bal_cfg_load(void)
 /* Declared here, above every user, so the volatile alias is visible to
  * app_bal_update(); the S6 code below reaches it through that alias. */
 static app_bal_run_t s_run;
-static app_bal_run_t *const volatile s_run_p = &s_run;
+static app_bal_run_t *volatile s_run_p = &s_run;
 
 /* A pointer that fails bsp_sys_ram_ptr_ok() is replaced by this zeroed
  * state: valid == 0 makes every user take the "no usable frame" path
  * instead of dereferencing the wild address. */
 static const att_state_t s_att_safe;
 static uint32_t s_att_ptr_bad;
+
+/* 2026-11-07 16:14 crash: the faulting store was VSTR s0,[r0,#0x10] with
+ * r0 taken from [0x20000154] = s_bal_p, which held 0x2002B970 instead of
+ * 0x20003170. r4 itself was correct, so the damage was a *write* into .data,
+ * not a lost register. Re-derive both aliases from the objects themselves on
+ * every use: the addresses then come from the literal pool in flash, and a
+ * corrupted word can only cost one skipped write instead of a bus fault. */
+static uint32_t s_ptr_fix;
+
+static void bal_ptr_guard(void)
+{
+    if (s_bal_p != &s_bal)
+    {
+        ++s_ptr_fix;
+        if (s_ptr_fix <= 3u)
+        {
+            log_printf("[GUARD] s_bal_p %x -> %x", (unsigned)(uintptr_t)s_bal_p,
+                       (unsigned)(uintptr_t)&s_bal);
+        }
+        s_bal_p = &s_bal;
+    }
+    if (s_run_p != &s_run)
+    {
+        ++s_ptr_fix;
+        if (s_ptr_fix <= 3u)
+        {
+            log_printf("[GUARD] s_run_p %x -> %x", (unsigned)(uintptr_t)s_run_p,
+                       (unsigned)(uintptr_t)&s_run);
+        }
+        s_run_p = &s_run;
+    }
+}
+
+uint32_t app_guard_ptr_fix_count(void)
+{
+    return s_ptr_fix;
+}
 
 void app_guard_att_ptr_bad(uint32_t v)
 {
@@ -408,6 +445,7 @@ void app_bal_update(void)
     }
 
     bsp_sys_ctx = BSP_CTX_BAL;
+    bal_ptr_guard();
     a = att_get();
     if (bsp_sys_ram_ptr_ok(a) == 0u)
     {
@@ -3011,7 +3049,9 @@ static void key_action(uint32_t now)
          * from the release and not from whenever the debounce noticed it. */
         if (bsp_key_take_press())
         {
-            if (s_run_p->state != (uint8_t)BAL_ST_DISARMED)
+            /* app_balance_info() takes &s_run from the literal pool, so this
+             * path cannot be poisoned by a write into the pointer alias. */
+            if (app_balance_info()->state != (uint8_t)BAL_ST_DISARMED)
             {
                 (void)app_balance_arm(0u);
                 bsp_led_write(0u);
