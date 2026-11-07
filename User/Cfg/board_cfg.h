@@ -513,6 +513,16 @@ extern "C" {
  * accelerates at ~2900 rpm/s and overshoots before the 10 ms speed window
  * can react (measured: a visible lurch at every start). */
 #define SPD_RAMP_RPM_S          600.0f
+/* S7.5 current-reference slew for the speed loop, A per 1 ms step.
+ * The speed PI can jump from 0 to the 1.20 A clamp in one step (kick plus
+ * Kp*error).  The current loop answers a step with ~10% overshoot, so the
+ * instantaneous peak reached 1.319 A against FOC_I_TRIP_A 1280 mA and the
+ * drive tripped on overcurrent 3.6 s after "spd 500" (measured, 2026-11-07).
+ * 0.03 A/ms walks to the clamp in 40 ms, which is faster than the 600 rpm/s
+ * reference ramp needs and slow enough that the peak stays ~10% below the
+ * trip.  The balance law has its own slew (BAL_SLEW_MNM_STEP) and does not
+ * use this path. */
+#define SPD_IQ_SLEW_A           0.03f
 /* Acceleration feedforward: iq needs J/Kt amperes per rad/s^2 to follow the
  * reference ramp. J/Kt = 9e-5 / 0.0289 = 3.1e-3. Without it the integrator
  * had to build ~0.2 A during the ramp and the 100 rpm step overshot ~96%. */

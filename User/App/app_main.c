@@ -116,6 +116,12 @@ static uint16_t s_prot_enc_crc_cnt; /* consecutive CRC-bad encoder frames */
 static alg_spd_t s_spd;
 static uint8_t   s_spd_div;
 static uint32_t  s_spd_kick_t0;
+/* S7.5 slewed speed-loop current command, A. The PI output is stepped once
+ * per 1 ms; without the slew the current reference jumps from 0 to the
+ * 1.20 A clamp and the current loop overshoot (~10%) crosses the 1.28 A
+ * trip. Reset wherever the loop is (re)seeded so the slew never fights a
+ * preload. */
+static float     s_spd_iq;
 
 /* Ripple diagnostic: min/max of iq and speed over a short window. */
 static app_rip_t  s_rip;
@@ -1770,6 +1776,7 @@ uint8_t app_spd_set(float rpm)
     s_spd.kick_on  = 1u;
     s_spd_kick_t0  = HAL_GetTick();
     s_spd_div     = (uint8_t)SPD_DIV;   /* run a step on the next frame */
+    s_spd_iq      = 0.0f;               /* slew starts from a clean zero */
     alg_pi_reset(&s_spd.pi);
     s_foc_info.spd_ref    = rpm;   /* display only; the loop uses the ramp */
     s_foc_info.spd_target = rpm;
@@ -1782,6 +1789,7 @@ void app_spd_off(void)
     s_spd.spd_ref  = 0.0f;
     s_spd_target   = 0.0f;
     s_spd.out     = 0.0f;
+    s_spd_iq      = 0.0f;
     alg_pi_reset(&s_spd.pi);
     s_foc_info.spd_ref = 0.0f;
     s_foc_info.spd_target = 0.0f;
@@ -2278,7 +2286,16 @@ static void task_foc(uint32_t t_pick)
              * way round (measured: +0.6 A on the forced frame drags the
              * rotor to -300 rpm). Mirror the command so that "push harder"
              * still means grow the speed the loop is being asked for. */
-            s_foc_info.iq_ref = s_spd.out;
+            /* S7.5: slew the reference so the current loop sees a ramp, not
+             * a step. See SPD_IQ_SLEW_A in board_cfg.h for the measurement. */
+            {
+                float want = s_spd.out;
+                float d    = want - s_spd_iq;
+                if (d >  SPD_IQ_SLEW_A) { d =  SPD_IQ_SLEW_A; }
+                if (d < -SPD_IQ_SLEW_A) { d = -SPD_IQ_SLEW_A; }
+                s_spd_iq += d;
+                s_foc_info.iq_ref = s_spd_iq;
+            }
             if ((s_sfoc != 0u) && (s_obs.omega_e < 0.0f)) {
                 s_foc_info.iq_ref = -s_foc_info.iq_ref;
             }
@@ -2412,6 +2429,7 @@ static void task_foc(uint32_t t_pick)
                  * (without it the acceleration feedforward sees a
                  * (rpm_now - 0)/ts step: ~32000 rad/s^2 * 3.11e-3 A = ~100 A). */
                 s_spd.spd_ref = rpm_now;
+                s_spd_iq      = iq0;   /* slew continues from the drag torque */
                 alg_spd_preload(&s_spd, iq0);
             }
         }
