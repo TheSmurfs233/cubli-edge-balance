@@ -284,84 +284,70 @@ void mid_enc_init(void)
  * is the documented contract (CRC alone), but a window found by searching has
  * to be plausible too - at 20 kHz the wheel cannot move far between frames.
  * */
-/* Which rotation of the 32-bit read last produced a good frame. The search
- * starts there and walks all 32 positions, because the MT6701 does not restart
- * its frame counter when CSN rises: a burst that was cut short (abort, OVR, a
- * command-time read) leaves it mid-frame, and the next read can be off by 8,
- * 16 or 24 bits - more than one byte. */
-static uint8_t s_cand_ix;
+/* Byte offset of the last good frame (0/8/16/24), for diagnostics. */
 
-static uint8_t enc_align(uint32_t w32, uint32_t lim, uint32_t *w_out)
+static uint8_t enc_decode(const uint8_t f[BSP_SSI_FRAME_LEN], uint32_t lim,
+                          uint32_t *w_out)
 {
-    uint8_t k;
-    uint8_t off;
-    for (k = 0u; k < 32u; k++) {
-        uint32_t win;
+    uint8_t  i;
+    uint8_t  idle = 0xFFu;
+    uint8_t  hits = 0u;
+    uint32_t w;
 
-        off = (uint8_t)((s_cand_ix + k) & 31u);
-        /* The MT6701 shifts out 24 data bits and then 8 idle bits and repeats,
-         * so the next read can start a whole byte later inside that period.
-         * Recovering it needs a ROTATION, not a right shift: the missing bits
-         * come back around the top of the 32-bit word.
-         * Any offset 0..31 is possible, so all of them are tried. */
-        win = (off == 0u) ? (w32 >> 8)
-                          : ((((w32 << off) | (w32 >> (32u - off))) >> 8) & 0xFFFFFFu);
-        if (mid_enc_crc6(win >> 6) != (win & 0x3Fu)) {
+    /* The MT6701 shifts out 24 data bits and then holds the line high for the
+     * remaining clocks, so a four-byte burst always contains exactly one 0xFF
+     * byte: the idle tail. The 24 data bits start right after it in stream
+     * order. Anchoring on that byte is deterministic; the old "try all 32
+     * rotations and trust CRC6" search was not, because with 32 candidates a
+     * corrupt burst produced a CRC-passing window roughly 3 times out of 4 and
+     * whichever one won moved the electrical angle (measured 2026-11-07: 30 %
+     * of the bursts slipped by a byte while the wheel turned). */
+    for (i = 0u; i < BSP_SSI_FRAME_LEN; i++) {
+        uint32_t cand;
+        int32_t  jd;
+        uint32_t d2;
+
+        if (f[i] != 0xFFu) {
             continue;
         }
-        /* Plausibility gate. A CRC6 pass happens once in 64 tries and all 32
-         * rotations are tried, so a corrupted burst readily "decodes" into a
-         * window that is off by up to a full turn; taking it would jump the
-         * electrical angle. The wheel cannot move more than lim counts
-         * between two frames, so a bigger jump is CRC luck, not the frame.
-         *
-         * Only the very first lock of a reader with no history skips the
-         * gate. It applies to the rotation already in use as well: a burst
-         * that is corrupt can pass CRC6 at that same rotation by luck (1 in
-         * 64), and taking it moved the angle half a turn - the stress stream
-         * in test/host found one such frame in 3000.
-         *
-         * This used to need the same rotation twice in a row. That starved
-         * the angle: the hardware slips 30 % of the frames once the wheel
-         * turns (docs/00 #059), so the phase rarely repeated and the FOC ran
-         * on tens-of-frames-old rotor position - the motor buzzed and the
-         * cube could not be held (measured 2026-11-07). */
+        hits++;
+        /* A data byte can itself be 0xFF, so every 0xFF has to be tried as
+         * the boundary: CRC6 and the travel gate decide which one is real. */
+        cand = ((uint32_t)f[(i + 1u) & 3u] << 16) |
+               ((uint32_t)f[(i + 2u) & 3u] << 8)  |
+                (uint32_t)f[(i + 3u) & 3u];
+        if (mid_enc_crc6(cand >> 6) != (cand & 0x3Fu)) {
+            continue;
+        }
         if (s_enc.valid != 0u) {
-            int32_t  jd = (int32_t)((win >> 10) & 0x3FFFu) - (int32_t)s_enc.raw;
-            uint32_t tol;
-
+            jd = (int32_t)((cand >> 10) & 0x3FFFu) - (int32_t)s_enc.raw;
             if (jd >  8192) { jd -= 16384; }
             if (jd < -8192) { jd += 16384; }
-            /* A rotation other than the one already in use can only be a
-             * slipped frame, and a slip does not move the angle at all: it
-             * re-cuts the same 24-bit word. So a non-cached rotation gets a
-             * tight tolerance, while the rotation in use keeps the full
-             * travel budget. Without this a CRC-lucky candidate can win as
-             * soon as the elapsed time makes lim wide (measured: after a 5 ms
-             * gap the decoder took a frame 45 deg away). */
-            {
-                uint32_t d2 = (uint32_t)((jd < 0) ? -jd : jd);
-
-                tol = (off == s_win) ? lim : (uint32_t)ENC_SLIP_TOL;
-                if (d2 > tol) {
-                    continue;                    /* CRC luck, not the frame */
-                }
+            d2 = (uint32_t)((jd < 0) ? -jd : jd);
+            if (d2 > lim) {
+                continue;                /* CRC luck on a corrupt burst */
             }
         }
-        s_win     = off;
-        s_cand_ix = off;
-        *w_out    = win;
-        return 1u;
+        idle = i;
+        w    = cand;
+        break;
+    }
+    (void)hits;
+    if (idle == 0xFFu) {
+        return 0u;                       /* no frame boundary with a good CRC */
     }
 
-    return 0u;
+    /* Byte offset of the frame start, in the units the ssi command and the
+     * host tests use: 0 = aligned, 8/16/24 = one/two/three bytes late. */
+    s_win = (uint8_t)(((1u + idle) & 3u) * 8u);
+    *w_out = w;
+    return 1u;
 }
 
 
 void mid_enc_update(void)
 {
     uint8_t  f[BSP_SSI_FRAME_LEN];
-    uint32_t w32;
     uint32_t w;
     uint16_t d;
     uint8_t  mg;
@@ -413,11 +399,6 @@ void mid_enc_update(void)
         return;
     }
 
-    /* 32 bits in, 24 bits out: the frame can start at any bit offset, so let
-     * the decoder find it instead of trusting the first three bytes. */
-    w32 = ((uint32_t)f[0] << 24) | ((uint32_t)f[1] << 16) |
-          ((uint32_t)f[2] << 8)  |  (uint32_t)f[3];
-
     /* Slack of 20 counts on top of the physical travel: 20 counts is 0.12 %%
      * of a turn, so a CRC6 false hit (1 in 64, times 32 rotations) almost
      * never lands that close to the previous angle. The old 100-count
@@ -431,7 +412,7 @@ void mid_enc_update(void)
         }
         lim = ENC_ALIGN_SLACK + (age_us * ENC_LSB_PER_US_X10) / 10u;
     }
-    if (enc_align(w32, lim, &w) == 0u) {
+    if (enc_decode(f, lim, &w) == 0u) {
         /* Do not just skip the frame: a corrupt read usually means the reader
          * slipped by a byte, and without a resync every frame after it is
          * misaligned too (18#L-16). Aborting flushes the receive path so the
@@ -678,42 +659,18 @@ void mid_enc_clear_errs(void)
 uint8_t mid_enc_zero(void)
 {
     uint8_t  f[BSP_SSI_FRAME_LEN];
-    uint32_t w32;
     uint32_t w = 0u;
     uint16_t d;
-    uint8_t  a;
-    uint8_t  found = 0u;
 
     if (bsp_ssi_read(f) != 0u) {
         return 1u;
     }
 
-    /* The read returns FOUR bytes (one word of slack for a slipped phase),
-     * so a 3-byte local here overflowed the stack by one byte and the captured
-     * zero depended on whatever the compiler happened to place next. Decode it
-     * exactly like mid_enc_update() does instead: try the 32 rotations and use
-     * the one whose CRC6 checks out. */
-    w32 = ((uint32_t)f[0] << 24) | ((uint32_t)f[1] << 16) |
-          ((uint32_t)f[2] << 8)  |  (uint32_t)f[3];
-    /* Try the rotation the reader is already on first: at 32 rotations a
-     * CRC6 false hit turns up in roughly one read in 64, and taking that one
-     * would capture a zero that is not where the rotor is. */
-    for (a = 0u; a < 32u; a++) {
-        uint8_t  rot = (a == 0u) ? s_win : (uint8_t)(a - 1u);
-        uint32_t win;
-
-        if ((a != 0u) && (rot == s_win)) {
-            continue;                       /* already tried as the cached one */
-        }
-        win = (rot == 0u) ? (w32 >> 8)
-              : ((((w32 << rot) | (w32 >> (32u - rot))) >> 8) & 0xFFFFFFu);
-        if (mid_enc_crc6(win >> 6) == (win & 0x3Fu)) {
-            w     = win;
-            found = 1u;
-            break;
-        }
-    }
-    if (found == 0u) {
+    /* The read returns FOUR bytes, so a 3-byte local here overflowed the stack
+     * by one byte and the captured zero depended on whatever the compiler
+     * happened to place next. Decode it exactly like mid_enc_update() does:
+     * anchor on the idle byte and let the travel gate off (no history). */
+    if (enc_decode(f, 0xFFFFFFFFu, &w) == 0u) {
         return 1u;                      /* nothing decodeable: keep the old zero */
     }
     d = (uint16_t)((w >> 10) & 0x3FFFu);

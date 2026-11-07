@@ -983,7 +983,7 @@ static void enc_build_frame(uint16_t d, uint8_t mg)
     fake_ssi_frame[0] = (uint8_t)((w >> 16) & 0xFFu);
     fake_ssi_frame[1] = (uint8_t)((w >> 8) & 0xFFu);
     fake_ssi_frame[2] = (uint8_t)(w & 0xFFu);
-    fake_ssi_frame[3] = 0u;                  /* one extra byte of slack */
+    fake_ssi_frame[3] = 0xFFu;               /* the line idles high */
 }
 
 /* Lay a valid frame down so that it starts "off" bits after the first bit the
@@ -1155,12 +1155,12 @@ static void test_enc(void)
          * +8. This is the state that used to fail CRC forever (docs/00 #052,
          * 100 % CRC error on hardware until the wheel was turned by hand). */
         before = mid_enc_info()->crc_errs;
-        enc_build_frame_at(3000u, 0u, 8u);
+        enc_build_frame_rot(3000u, 0u, 1u);     /* reader one byte late */
         mid_enc_update();                       /* one frame is enough now */
         T(mid_enc_info()->crc_errs == before);
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_info()->raw == 3000u);        /* angle survives the slip */
-        T(mid_enc_win() == 8u);                 /* frame sat 8 bits late */
+        T(mid_enc_win() == 24u);                /* frame sat one byte late */
     }
     section_end();
 
@@ -1357,7 +1357,7 @@ static void test_enc(void)
             fake_ssi_frame[0] = raw[i][0];
             fake_ssi_frame[1] = raw[i][1];
             fake_ssi_frame[2] = raw[i][2];
-            fake_ssi_frame[3] = 0u;
+            fake_ssi_frame[3] = 0xFFu;          /* idle tail, as on the wire */
             mid_enc_update();
             if (mid_enc_info()->crc_ok == 0u) {
                 bad++;
