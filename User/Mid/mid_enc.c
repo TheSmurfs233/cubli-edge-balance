@@ -275,11 +275,15 @@ void mid_enc_init(void)
  * command-time read) leaves it mid-frame, and the next read can be off by 8,
  * 16 or 24 bits - more than one byte. */
 static uint8_t s_cand_ix;
+/* A rotation that passed CRC once but is not the one already in use. It has
+ * to be seen twice in a row before the decoder moves (see enc_align). */
+static uint8_t s_pend_off = 0xFFu;
 
 static uint8_t enc_align(uint32_t w32, uint32_t lim, uint32_t *w_out)
 {
     uint8_t k;
     uint8_t off;
+    uint8_t first_off = 0xFFu;
 
     for (k = 0u; k < 32u; k++) {
         uint32_t win;
@@ -304,10 +308,27 @@ static uint8_t enc_align(uint32_t w32, uint32_t lim, uint32_t *w_out)
                 continue;                        /* CRC luck, not the frame */
             }
         }
-        s_win     = off;
-        s_cand_ix = off;
-        *w_out    = win;
-        return 1u;
+        /* Two-frame confirmation. A CRC6 pass at a random rotation happens
+         * once in 64 tries and there are 32 rotations, so a single corrupted
+         * burst readily "decodes" into a window that is off by up to a full
+         * turn. Taking it jumps the electrical angle and the motor answers
+         * with a click/buzz and a rough spin (heard on hardware 2026-11-07
+         * while the wheel was turning and the SSI lines were picking up the
+         * phase current). The rotation already in use, and phase 0 of a
+         * never-locked reader, are trusted at once; anything else has to
+         * appear on two consecutive frames. One frame of confirmation costs
+         * 50 us of stale angle, which is 0.5 deg at 1700 rpm. */
+        if ((off == s_win) || (off == s_pend_off) || (s_enc.valid == 0u)) {
+            s_win     = off;
+            s_cand_ix = off;
+            *w_out    = win;
+            return 1u;
+        }
+        if (first_off == 0xFFu) { first_off = off; }
+    }
+    if (first_off != 0xFFu) {
+        s_pend_off = first_off;
+        return 2u;                  /* candidate seen, waiting for the repeat */
     }
     return 0u;
 }
@@ -321,6 +342,7 @@ void mid_enc_update(void)
     uint16_t d;
     uint8_t  mg;
     uint8_t  rc;
+    uint8_t  enc_rc;
     uint32_t lim;
     float    mech;
     float    elec;
@@ -374,7 +396,19 @@ void mid_enc_update(void)
           ((uint32_t)f[2] << 8)  |  (uint32_t)f[3];
 
     lim = 100u + (uint32_t)(((bsp_prof_now() - s_t_enc) / 1000u) * ENC_LSB_PER_MS);
-    if (enc_align(w32, lim, &w) == 0u) {
+    enc_rc = enc_align(w32, lim, &w);
+    if (enc_rc == 2u) {
+        /* A window passed CRC at a rotation we do not trust yet. Hold the
+         * previous angle for this one frame (0.5 deg at 1700 rpm) and, most
+         * important, do NOT publish the half-decoded raw: the confirmation
+         * frame reuses it as the continuity reference. */
+        s_enc.crc_ok = 0u;
+        s_enc.crc_errs++;
+        s_bad_run++;
+        bsp_ssi_start();
+        return;
+    }
+    if (enc_rc == 0u) {
         /* Do not just skip the frame: a corrupt read usually means the reader
          * slipped by a byte, and without a resync every frame after it is
          * misaligned too (18#L-16). Aborting flushes the receive path so the

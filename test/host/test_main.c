@@ -1130,8 +1130,10 @@ static void test_enc(void)
          * 100 % CRC error on hardware until the wheel was turned by hand). */
         before = mid_enc_info()->crc_errs;
         enc_build_frame_at(3000u, 0u, 8u);
-        mid_enc_update();
-        T(mid_enc_info()->crc_errs == before);
+        mid_enc_update();                       /* first sight: held back */
+        T(mid_enc_info()->crc_ok == 0u);
+        mid_enc_update();                       /* same window again: lock */
+        T(mid_enc_info()->crc_errs == before + 1u);
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_info()->raw == 3000u);        /* angle survives the slip */
         T(mid_enc_win() == 8u);                 /* frame sat 8 bits late */
@@ -1144,6 +1146,7 @@ static void test_enc(void)
 
         enc_build_frame(3000u, 0u);
         mid_enc_update();                       /* seed a valid phase */
+        mid_enc_update();                       /* phase 0 also needs confirm */
         T(mid_enc_win() == 0u);
 
         errs_before = mid_enc_info()->crc_errs;
@@ -1156,27 +1159,32 @@ static void test_enc(void)
         /* One, two and three bytes late: 8, 16 and 24 bits of rotation. The
          * hardware showed all three (docs/00 #054, #055). */
         enc_build_frame_rot(3000u, 0u, 1u);
+        mid_enc_update();                       /* new phase: confirm first */
         mid_enc_update();
-        T(mid_enc_info()->crc_errs == errs_before);
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_info()->raw == 3000u);
         T(mid_enc_win() == 24u);
 
         enc_build_frame_rot(3000u, 0u, 2u);
+        mid_enc_update();                       /* new phase: confirm first */
         mid_enc_update();
-        T(mid_enc_info()->crc_errs == errs_before);
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_info()->raw == 3000u);
         T(mid_enc_win() == 16u);
 
         enc_build_frame_rot(3000u, 0u, 3u);
+        mid_enc_update();                       /* new phase: confirm first */
         mid_enc_update();
-        T(mid_enc_info()->crc_errs == errs_before);
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_info()->raw == 3000u);
         T(mid_enc_win() == 8u);
 
+        /* Each new phase was held back once, so exactly three frames were
+         * counted as errors on the way here. */
+        T(mid_enc_info()->crc_errs == errs_before + 3u);
+
         enc_build_frame_rot(3000u, 0u, 0u);     /* and straight back to phase 0 */
+        mid_enc_update();
         mid_enc_update();
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_win() == 0u);
