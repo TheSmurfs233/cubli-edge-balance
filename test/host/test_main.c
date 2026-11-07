@@ -966,6 +966,14 @@ extern uint8_t fake_ssi_busy;
 extern uint32_t fake_ssi_resyncs;
 extern uint8_t  fake_ssi_quiet;
 
+/* The decoder refuses a frame whose angle jumped further than the rotor can
+ * physically travel since the last good one, so a test that teleports the
+ * angle has to move the clock too (the host DWT model never ticks by itself). */
+static void enc_tick_us(uint32_t us)
+{
+    fake_dwt.CYCCNT += us * (SYS_CORE_CLK_HZ / 1000000u);
+}
+
 static void enc_build_frame(uint16_t d, uint8_t mg)
 {
     uint32_t bits = (((uint32_t)d & 0x3FFFu) << 4) | ((uint32_t)mg & 0x0Fu);
@@ -1040,12 +1048,14 @@ static void test_enc(void)
     section_end();
 
     section("enc: quarter and half turn");
+    enc_tick_us(10000u);                        /* a 90 deg step needs time */
     enc_build_frame(4096u, 0u);                 /* 90 deg mechanical */
     mid_enc_update();
     e = mid_enc_info();
     T(fabsf(e->mech_deg - 90.0f) < 0.02f);
     T(fabsf(e->elec_deg - 270.0f) < 0.05f);     /* 90*7 = 630 -> 270 */
 
+    enc_tick_us(10000u);
     enc_build_frame(8192u, 0u);                 /* 180 deg */
     mid_enc_update();
     T(fabsf(mid_enc_info()->mech_deg - 180.0f) < 0.02f);
@@ -1130,10 +1140,8 @@ static void test_enc(void)
          * 100 % CRC error on hardware until the wheel was turned by hand). */
         before = mid_enc_info()->crc_errs;
         enc_build_frame_at(3000u, 0u, 8u);
-        mid_enc_update();                       /* first sight: held back */
-        T(mid_enc_info()->crc_ok == 0u);
-        mid_enc_update();                       /* same window again: lock */
-        T(mid_enc_info()->crc_errs == before + 1u);
+        mid_enc_update();                       /* one frame is enough now */
+        T(mid_enc_info()->crc_errs == before);
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_info()->raw == 3000u);        /* angle survives the slip */
         T(mid_enc_win() == 8u);                 /* frame sat 8 bits late */
@@ -1146,7 +1154,6 @@ static void test_enc(void)
 
         enc_build_frame(3000u, 0u);
         mid_enc_update();                       /* seed a valid phase */
-        mid_enc_update();                       /* phase 0 also needs confirm */
         T(mid_enc_win() == 0u);
 
         errs_before = mid_enc_info()->crc_errs;
@@ -1159,35 +1166,76 @@ static void test_enc(void)
         /* One, two and three bytes late: 8, 16 and 24 bits of rotation. The
          * hardware showed all three (docs/00 #054, #055). */
         enc_build_frame_rot(3000u, 0u, 1u);
-        mid_enc_update();                       /* new phase: confirm first */
-        mid_enc_update();
+        mid_enc_update();                       /* a rotation is taken at once */
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_info()->raw == 3000u);
         T(mid_enc_win() == 24u);
 
         enc_build_frame_rot(3000u, 0u, 2u);
-        mid_enc_update();                       /* new phase: confirm first */
         mid_enc_update();
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_info()->raw == 3000u);
         T(mid_enc_win() == 16u);
 
         enc_build_frame_rot(3000u, 0u, 3u);
-        mid_enc_update();                       /* new phase: confirm first */
         mid_enc_update();
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_info()->raw == 3000u);
         T(mid_enc_win() == 8u);
 
-        /* Each new phase was held back once, so exactly three frames were
-         * counted as errors on the way here. */
-        T(mid_enc_info()->crc_errs == errs_before + 3u);
+        /* A rotation whose angle is continuous is data, not an error: the
+         * confirm rule that used to hold the first frame back was what starved
+         * the FOC vector when the hardware slipped every third frame. */
+        T(mid_enc_info()->crc_errs == errs_before);
 
         enc_build_frame_rot(3000u, 0u, 0u);     /* and straight back to phase 0 */
         mid_enc_update();
-        mid_enc_update();
         T(mid_enc_info()->crc_ok == 1u);
         T(mid_enc_win() == 0u);
+    }
+    section_end();
+
+    section("enc: 30 % of the frames sliding by a byte still tracks");
+    {
+        /* Hardware, 2026-11-07 (docs/00 #059): with the wheel turning the SSI
+         * ribbon picked up the phase current and 30 % of the bursts arrived a
+         * whole byte late. The two-frame confirmation that used to be here
+         * needed the same rotation twice in a row, which almost never happened
+         * at that error rate, so the angle froze and the motor buzzed. This
+         * replays that stream: a slip every third frame must still decode to
+         * the true angle on the same frame. */
+        uint32_t seed = 20261107u;
+        uint16_t d    = 3000u;
+        int      k;
+        int      good   = 0;
+        int      worst  = 0;
+
+        for (k = 0; k < 3000; k++) {
+            uint8_t slip = 0u;
+
+            seed = (seed * 1103515245u) + 12345u;
+            if (((seed >> 16) & 3u) == 0u) {
+                slip = (uint8_t)(1u + ((seed >> 18) & 3u));   /* 1..3 bytes */
+            }
+            d = (uint16_t)((d + 7u) & 0x3FFFu);               /* 7 counts/ms */
+            enc_build_frame_rot(d, 0u, slip);
+            mid_enc_update();
+
+            if (mid_enc_info()->crc_ok != 0u) {
+                int32_t jd = (int32_t)mid_enc_info()->raw - (int32_t)d;
+
+                if (jd >  8192) { jd -= 16384; }
+                if (jd < -8192) { jd += 16384; }
+                if (jd < 0) { jd = -jd; }
+                if (jd > worst) { worst = jd; }
+                good++;
+            }
+        }
+
+        /* Every non-slipped frame and every slipped frame decode, and none of
+         * them lands on a wrong angle: this is what keeps the FOC vector live. */
+        T(good >= 2990);
+        T(worst <= 2);
     }
     section_end();
 
@@ -1257,6 +1305,7 @@ static void test_enc(void)
 
         fake_ssi_fail  = 0u;
         fake_ssi_quiet = 0u;
+        enc_tick_us(10000u);                    /* the park lasted 2.5 ms + */
         enc_build_frame(2048u, 0u);
         mid_enc_update();                       /* healthy again */
         T(mid_enc_info()->crc_ok == 1u);
@@ -1281,7 +1330,9 @@ static void test_enc(void)
         uint8_t i;
         uint8_t bad = 0u;
 
+        enc_tick_us(10000u);
         for (i = 0u; i < 15u; i++) {
+            enc_tick_us(1000u);                 /* 1 ms between frames */
             fake_ssi_frame[0] = raw[i][0];
             fake_ssi_frame[1] = raw[i][1];
             fake_ssi_frame[2] = raw[i][2];
@@ -1304,6 +1355,7 @@ static void test_enc(void)
     section_end();
 
     section("enc: direction reverses the electrical angle");
+    enc_tick_us(5000u);
     enc_build_frame(2048u + 468u, 0u);          /* zero + ~10.3 deg */
     mid_enc_update();
     {

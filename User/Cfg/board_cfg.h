@@ -568,8 +568,13 @@ extern "C" {
 #define FOC_I_TRIP_A            MOTOR_I_TRIP_A    /* abort above this */
 #define FOC_TRIP_FRAMES         5u
 
-/* Read the encoder every N control frames (1 = 20kHz). */
-#define ENC_DIV                 1u
+/* Read the encoder every N control frames (1 = 20kHz).
+ *
+ * 2 = 10 kHz since docs/00 #059: the SSI ribbon picks up the phase current, so
+ * every read is a chance to slip a byte. Halving the rate halves the number of
+ * slips per second and leaves the bus idle in between; the electrical angle is
+ * then up to 100 us old, which is 2.1 deg at 500 rpm with 7 pole pairs. */
+#define ENC_DIV                 2u
 
 /* Poll period while the bridge is off (ms). The ADC only runs in RUN, so a
  * stopped motor needs its own timer: 1ms = 1kHz, plenty for "enc" and

@@ -66,7 +66,14 @@ static uint32_t  s_t_enc;        /* timestamp of the last accepted frame   */
 /* How many raw LSB (16384 per turn) the wheel can cover in one millisecond at
  * the mechanical ceiling of this machine, ~2000 rpm = 50.5 LSB/ms. Used to
  * reject frames that a bit-shifted search "recovered" only by CRC luck. */
-#define ENC_LSB_PER_MS     55u
+/* Encoder counts the rotor can cover per millisecond; the plausibility gate
+ * allows this much movement plus a fixed slack. 55 used to be here, which is
+ * only 200 rpm: above that a CORRECT frame that arrived at a new rotation was
+ * thrown away as implausible. 700 covers 2200 rpm (601 counts/ms) with margin
+ * and still refuses a full-turn jump (16384 counts, 23 ms of travel). */
+#define ENC_LSB_PER_MS     700u
+/* Counts of slack on top of the travel estimate (0.12 %% of a turn). */
+#define ENC_ALIGN_SLACK    20u
 static float    s_zero_rad;   /* zero_deg converted once */
 
 /* Speed estimator state (see ENC_SPD_WINDOW_MS) */
@@ -275,15 +282,11 @@ void mid_enc_init(void)
  * command-time read) leaves it mid-frame, and the next read can be off by 8,
  * 16 or 24 bits - more than one byte. */
 static uint8_t s_cand_ix;
-/* A rotation that passed CRC once but is not the one already in use. It has
- * to be seen twice in a row before the decoder moves (see enc_align). */
-static uint8_t s_pend_off = 0xFFu;
 
 static uint8_t enc_align(uint32_t w32, uint32_t lim, uint32_t *w_out)
 {
     uint8_t k;
     uint8_t off;
-    uint8_t first_off = 0xFFu;
 
     for (k = 0u; k < 32u; k++) {
         uint32_t win;
@@ -299,7 +302,24 @@ static uint8_t enc_align(uint32_t w32, uint32_t lim, uint32_t *w_out)
         if (mid_enc_crc6(win >> 6) != (win & 0x3Fu)) {
             continue;
         }
-        if ((off != 0u) && (s_enc.valid != 0u)) {
+        /* Plausibility gate. A CRC6 pass happens once in 64 tries and all 32
+         * rotations are tried, so a corrupted burst readily "decodes" into a
+         * window that is off by up to a full turn; taking it would jump the
+         * electrical angle. The wheel cannot move more than lim counts
+         * between two frames, so a bigger jump is CRC luck, not the frame.
+         *
+         * Only the very first lock of a reader with no history skips the
+         * gate. It applies to the rotation already in use as well: a burst
+         * that is corrupt can pass CRC6 at that same rotation by luck (1 in
+         * 64), and taking it moved the angle half a turn - the stress stream
+         * in test/host found one such frame in 3000.
+         *
+         * This used to need the same rotation twice in a row. That starved
+         * the angle: the hardware slips 30 % of the frames once the wheel
+         * turns (docs/00 #059), so the phase rarely repeated and the FOC ran
+         * on tens-of-frames-old rotor position - the motor buzzed and the
+         * cube could not be held (measured 2026-11-07). */
+        if (s_enc.valid != 0u) {
             int32_t jd = (int32_t)((win >> 10) & 0x3FFFu) - (int32_t)s_enc.raw;
 
             if (jd >  8192) { jd -= 16384; }
@@ -308,27 +328,10 @@ static uint8_t enc_align(uint32_t w32, uint32_t lim, uint32_t *w_out)
                 continue;                        /* CRC luck, not the frame */
             }
         }
-        /* Two-frame confirmation. A CRC6 pass at a random rotation happens
-         * once in 64 tries and there are 32 rotations, so a single corrupted
-         * burst readily "decodes" into a window that is off by up to a full
-         * turn. Taking it jumps the electrical angle and the motor answers
-         * with a click/buzz and a rough spin (heard on hardware 2026-11-07
-         * while the wheel was turning and the SSI lines were picking up the
-         * phase current). The rotation already in use, and phase 0 of a
-         * never-locked reader, are trusted at once; anything else has to
-         * appear on two consecutive frames. One frame of confirmation costs
-         * 50 us of stale angle, which is 0.5 deg at 1700 rpm. */
-        if ((off == s_win) || (off == s_pend_off) || (s_enc.valid == 0u)) {
-            s_win     = off;
-            s_cand_ix = off;
-            *w_out    = win;
-            return 1u;
-        }
-        if (first_off == 0xFFu) { first_off = off; }
-    }
-    if (first_off != 0xFFu) {
-        s_pend_off = first_off;
-        return 2u;                  /* candidate seen, waiting for the repeat */
+        s_win     = off;
+        s_cand_ix = off;
+        *w_out    = win;
+        return 1u;
     }
     return 0u;
 }
@@ -342,7 +345,6 @@ void mid_enc_update(void)
     uint16_t d;
     uint8_t  mg;
     uint8_t  rc;
-    uint8_t  enc_rc;
     uint32_t lim;
     float    mech;
     float    elec;
@@ -395,20 +397,12 @@ void mid_enc_update(void)
     w32 = ((uint32_t)f[0] << 24) | ((uint32_t)f[1] << 16) |
           ((uint32_t)f[2] << 8)  |  (uint32_t)f[3];
 
-    lim = 100u + (uint32_t)(((bsp_prof_now() - s_t_enc) / 1000u) * ENC_LSB_PER_MS);
-    enc_rc = enc_align(w32, lim, &w);
-    if (enc_rc == 2u) {
-        /* A window passed CRC at a rotation we do not trust yet. Hold the
-         * previous angle for this one frame (0.5 deg at 1700 rpm) and, most
-         * important, do NOT publish the half-decoded raw: the confirmation
-         * frame reuses it as the continuity reference. */
-        s_enc.crc_ok = 0u;
-        s_enc.crc_errs++;
-        s_bad_run++;
-        bsp_ssi_start();
-        return;
-    }
-    if (enc_rc == 0u) {
+    /* Slack of 20 counts on top of the physical travel: 20 counts is 0.12 %%
+     * of a turn, so a CRC6 false hit (1 in 64, times 32 rotations) almost
+     * never lands that close to the previous angle. The old 100-count
+     * slack let about one frame in a thousand through to a wrong angle. */
+    lim = ENC_ALIGN_SLACK + (uint32_t)(((bsp_prof_now() - s_t_enc) / 1000u) * ENC_LSB_PER_MS);
+    if (enc_align(w32, lim, &w) == 0u) {
         /* Do not just skip the frame: a corrupt read usually means the reader
          * slipped by a byte, and without a resync every frame after it is
          * misaligned too (18#L-16). Aborting flushes the receive path so the

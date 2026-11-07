@@ -113,6 +113,16 @@ void bsp_ssi_init(void)
 
     s_busy = 0u;
 
+    /* 5.31 MHz instead of the 10.625 MHz the .ioc prescaler would give. The
+     * MT6701 allows 10 MHz and the board had been running at 10.625 MHz, but
+     * the SSI ribbon runs next to the phase cables: once the wheel turned the
+     * reader corrupted 30 % of the frames (docs/00 #059). Halving the clock
+     * doubles the setup/hold margin; a 4-byte frame then shifts in 6.0 us,
+     * still far inside the 50 us control period, and the value is re-applied
+     * here so a CubeMX regeneration cannot silently undo it. */
+    SPI1->CR1 = (SPI1->CR1 & ~(uint32_t)SPI_CR1_BR) |
+                (uint32_t)SPI_CR1_BR_1 | (uint32_t)SPI_CR1_BR_0;
+
     /* The HAL enables SPE per transfer; this driver pokes the registers, so
      * enable it once here. */
     SPI1->CR1 |= SPI_CR1_SPE;
