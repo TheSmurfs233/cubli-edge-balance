@@ -374,6 +374,26 @@ static void bal_cfg_load(void)
 static app_bal_run_t s_run;
 static app_bal_run_t *const volatile s_run_p = &s_run;
 
+/* A pointer that fails bsp_sys_ram_ptr_ok() is replaced by this zeroed
+ * state: valid == 0 makes every user take the "no usable frame" path
+ * instead of dereferencing the wild address. */
+static const att_state_t s_att_safe;
+static uint32_t s_att_ptr_bad;
+
+void app_guard_att_ptr_bad(uint32_t v)
+{
+    ++s_att_ptr_bad;
+    if (s_att_ptr_bad <= 3u)
+    {
+        log_printf("[GUARD] att ptr bad: %x", (unsigned)v);
+    }
+}
+
+uint32_t app_guard_att_ptr_count(void)
+{
+    return s_att_ptr_bad;
+}
+
 void app_bal_update(void)
 {
     const att_state_t *a;
@@ -387,7 +407,13 @@ void app_bal_update(void)
         return;
     }
 
+    bsp_sys_ctx = BSP_CTX_BAL;
     a = att_get();
+    if (bsp_sys_ram_ptr_ok(a) == 0u)
+    {
+        app_guard_att_ptr_bad((uint32_t)(uintptr_t)a);
+        a = &s_att_safe;
+    }
     s_bal_p->att_valid = a->valid;
     s_bal_p->phi_deg   = a->theta_deg;
     s_bal_p->dphi_dps  = a->theta_dot_dps;
@@ -1927,6 +1953,7 @@ const app_vf_info_t *app_vf_info(void)
 /* ------------------------------------------------------------------ */
 static void task_foc(uint32_t t_pick)
 {
+    bsp_sys_ctx = BSP_CTX_FOC;
     const current_sample_t *cs = mid_current_get();
     const mid_enc_t        *e  = mid_enc_info();
     float duty[3];
@@ -3534,6 +3561,7 @@ static void task_wave(uint32_t now)
 /* ------------------------------------------------------------------ */
 void app_loop(void)
 {
+    bsp_sys_ctx = BSP_CTX_LOOP;
     uint32_t now    = HAL_GetTick();
     uint32_t t_loop = bsp_prof_now();
     uint32_t t;

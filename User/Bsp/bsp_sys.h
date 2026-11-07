@@ -39,6 +39,16 @@ uint32_t bsp_sys_fpcar(void);
 void bsp_sys_fpu_eager(uint8_t on);
 uint8_t bsp_sys_fpu_eager_get(void);
 
+/* Context marker: which path owned the CPU when the fault hit. */
+extern volatile uint32_t bsp_sys_ctx;
+#define BSP_CTX_LOOP   1u
+#define BSP_CTX_CMD    2u
+#define BSP_CTX_FOC    3u
+#define BSP_CTX_BAL    4u
+
+/* 1 when the pointer points into the 32 KB SRAM window. */
+uint8_t bsp_sys_ram_ptr_ok(const void *p);
+
 /* Reads the physical r4 register.
  * r4 is callee-saved under AAPCS, so any call that changes it breaks the ABI.
  * The bench crash of 2026-11-07 always faults on the first read after

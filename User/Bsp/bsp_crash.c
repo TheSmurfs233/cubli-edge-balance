@@ -13,6 +13,7 @@
 #include "bsp_crash.h"
 #include "mid_log.h"
 #include "bsp_stack.h"
+#include "bsp_sys.h"
 
 #define CRASH_MAGIC      0x434C4F47u  /* 'CLOG': fresh, not yet shown */
 #define CRASH_MAGIC_SHOWN 0x434C4F52u /* 'CLOR': shown once, still readable */
@@ -35,7 +36,7 @@
 #define CRASH_SLOT_STK0 23u   /* .. 28 = six words above the frame */
 #define CRASH_SLOT_CPACR 29u
 #define CRASH_SLOT_FPCCR 30u
-#define CRASH_SLOT_FPCAR 31u
+#define CRASH_SLOT_CTX   31u   /* was FPCAR: the lazy-FPU theory is dead */
 
 /* Filled by the assembler stub below, consumed by bsp_crash_capture(). It is a
  * plain RAM array so the stub needs no stack and no branch to C. */
@@ -153,7 +154,7 @@ void bsp_crash_capture(uint32_t kind)
      * stacking state is inconsistent. Both are visible in these three. */
     crash_store(CRASH_SLOT_CPACR, SCB->CPACR);
     crash_store(CRASH_SLOT_FPCCR, FPU->FPCCR);
-    crash_store(CRASH_SLOT_FPCAR, FPU->FPCAR);
+    crash_store(CRASH_SLOT_CTX, bsp_sys_ctx);
 
     crash_store(CRASH_SLOT_MAGIC, CRASH_MAGIC);
 }
@@ -269,10 +270,10 @@ static void crash_print_block(void)
         log_printf(" crash stk %x %x",
                    (unsigned)(*crash_slot(CRASH_SLOT_STK0 + 4u)),
                    (unsigned)(*crash_slot(CRASH_SLOT_STK0 + 5u)));
-        log_printf(" crash fpu cpacr %x fpccr %x fpcar %x",
+        log_printf(" crash fpu cpacr %x fpccr %x ctx %u",
                    (unsigned)(*crash_slot(CRASH_SLOT_CPACR)),
                    (unsigned)(*crash_slot(CRASH_SLOT_FPCCR)),
-                   (unsigned)(*crash_slot(CRASH_SLOT_FPCAR)));
+                   (unsigned)(*crash_slot(CRASH_SLOT_CTX)));
         log_printf(" crash stack peak %u B of %u B",
                    (unsigned)bsp_stack_peak_bytes(),
                    (unsigned)bsp_stack_size_bytes());

@@ -19,9 +19,33 @@
 #include "bsp_sys.h"
 #include "stm32g4xx_hal.h"
 
+volatile uint32_t bsp_sys_ctx;
+
+uint8_t bsp_sys_ram_ptr_ok(const void *p)
+{
+#if defined(__CC_ARM)
+    uintptr_t v = (uintptr_t)p;
+
+    return ((v >= 0x20000000u) && (v < 0x20008000u)) ? 1u : 0u;
+#else
+    /* Host tests: statics live outside the target SRAM window, so the
+     * window check would reject every valid pointer and hide bugs. */
+    (void)p;
+    return 1u;
+#endif
+}
+
 void bsp_sys_init(void)
 {
     FLASH->ACR |= (FLASH_ACR_PRFTEN | FLASH_ACR_ICEN);
+
+    /* 2026-11-07: every bench crash so far was reported as an imprecise
+     * bus error, whose BFAR and PC are useless.  Disabling the write
+     * buffer makes the next one precise: BFAR and PC then name the
+     * store that went wild.  Cost is a few cycles per store. */
+#if defined(SCnSCB)
+    SCnSCB->ACTLR |= (uint32_t)SCnSCB_ACTLR_DISDEFWBUF_Msk;
+#endif
 }
 
 uint32_t bsp_sys_fpccr(void)

@@ -348,6 +348,8 @@ uint32_t app_guard_cpacr_bad(void);
 /* Counts callee-saved r4 clobbers seen across alg_bal_step(). */
 void     app_guard_r4_bad(uint32_t before, uint32_t after);
 uint32_t app_guard_r4_count(void);
+void app_guard_att_ptr_bad(uint32_t v);
+uint32_t app_guard_att_ptr_count(void);
 
 /* How many guard passes saw FPCCR.LSPACT set while normal code was running. */
 uint32_t app_guard_lspact(void);
