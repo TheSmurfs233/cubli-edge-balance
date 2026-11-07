@@ -46,7 +46,9 @@ extern SPI_HandleTypeDef hspi1;
  * the shift engine inside the still-open frame and the reader stayed at
  * bit 8 forever (four-byte frame with the idle 0xFF in the middle). Only a
  * millisecond-scale silence drives the internal bit counter back to 0. */
-#define SSI_RESYNC_QUIET_US   2500u
+#define SSI_RESYNC_QUIET_US   300u    /* measured: 2.5 ms blanked the electrical
+                                       * angle for 5 % of every second and made an
+                                       * audible tick; the chip needs a few clocks */
 
 static volatile uint8_t s_rx[BSP_SSI_FRAME_LEN];
 static volatile uint8_t s_busy;
@@ -59,6 +61,7 @@ static volatile uint8_t  s_resync_pend; /* 1 = park the bus as soon as the frame
 
 static void ssi_park(void);   /* forward: called from poll() and resync() */
 static uint8_t  s_stuck;  /* consecutive ISR periods still busy */
+static uint32_t s_spin_out; /* TXE never came ready inside bsp_ssi_start() */
 static uint8_t  s_cfg_err; /* DMA channel in code != the one CubeMX configured */
 
 
@@ -179,6 +182,9 @@ void bsp_ssi_start(void)
         while (((SPI1->SR & SPI_SR_TXE) == 0u) && (spin < SSI_SPIN_LIMIT)) {
             spin++;
         }
+        if (spin >= SSI_SPIN_LIMIT) {
+            s_spin_out++;
+        }
         *(volatile uint8_t *)&SPI1->DR = 0xFFu;
     }
 
@@ -190,7 +196,7 @@ uint8_t bsp_ssi_poll(uint8_t frame[BSP_SSI_FRAME_LEN])
     if (s_busy == 0u) {
         return 0u;
     }
-    if ((DMA1->ISR & SSI_ISR_TCIF) == 0u) {
+    if (((DMA1->ISR & SSI_ISR_TCIF) == 0u) && (SSI_DMA->CNDTR != 0u)) {
         return 0u;                    /* still shifting */
     }
 
@@ -316,6 +322,11 @@ void bsp_ssi_force_resync(void)
     }
     s_resync_busy++;
     ssi_park();                 /* parks, silences and counts the resync */
+}
+
+uint32_t bsp_ssi_spinout_count(void)
+{
+    return s_spin_out;
 }
 
 uint32_t bsp_ssi_resync_busy_count(void)

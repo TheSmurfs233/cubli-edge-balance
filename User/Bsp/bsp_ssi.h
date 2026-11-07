@@ -75,6 +75,7 @@ uint8_t bsp_ssi_quiet(void);
 /* Bus parks since power on, and how many of them were forced by a wedged frame. */
 uint32_t bsp_ssi_resync_count(void);
 uint32_t bsp_ssi_resync_busy_count(void);
+uint32_t bsp_ssi_spinout_count(void);   /* dummy bytes that never went out */
 
 /* Blocking convenience wrapper (start + spin until done).
  * Returns 0 on success, non-zero if the transfer failed. */

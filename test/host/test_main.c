@@ -1300,7 +1300,7 @@ static void test_enc(void)
     }
     section_end();
 
-    section("enc: a wedged frame is parked, not waited on forever");
+    section("enc: a wedged frame is parked once the bus has been stuck for 1 ms");
     {
         uint32_t resyncs = fake_ssi_resyncs;
         uint8_t  k;
@@ -1308,16 +1308,20 @@ static void test_enc(void)
         /* Nothing completes: a DMA request lost to an abort leaves CNDTR
          * mid-count, so TCIF never fires and s_busy stays 1 forever. Waiting
          * cannot fix that -- on hardware the liveness guard faulted 5 ms later
-         * with "encoder stuck" (docs/00 #057). After ENC_LATE_RESYNC calls the
-         * bus must be parked so the slave sees a real clock silence. */
+         * with "encoder stuck" (docs/00 #057). But the escalation must not fire
+         * just because twenty calls in a row were busy: at 20 kHz that is 1 ms
+         * of normal jitter, and it parked the bus 21 times a second (measured
+         * 2026-11-07, audible tick). It now needs a full ENC_WEDGE_US of no
+         * accepted frame. */
         fake_ssi_fail = 1u;
         fake_ssi_busy = 1u;
         for (k = 0u; k < 19u; k++) {
             mid_enc_update();
         }
-        T(fake_ssi_resyncs == resyncs);         /* just counted as late */
+        T(fake_ssi_resyncs == resyncs);         /* busy, but not yet wedged */
         T(mid_enc_late_run() == 19u);
-        mid_enc_update();                       /* the 20th call parks the bus */
+        enc_tick_us(1200u);                     /* past ENC_WEDGE_US */
+        mid_enc_update();                       /* now the bus gets parked */
         T(fake_ssi_resyncs == resyncs + 1u);
         T(mid_enc_late_run() == 0u);
 

@@ -65,7 +65,10 @@ static uint32_t  s_t_enc;        /* timestamp of the last accepted frame   */
  * fires. Measured 2026-11-07: s_busy stayed set until the liveness guard
  * faulted 5 ms later, because the busy path returned without ever reaching
  * the recovery in bsp_ssi_start(). */
-#define ENC_LATE_RESYNC    20u
+#define ENC_WEDGE_US     1000u   /* no accepted frame for this long is wedged.
+                                  * 20 late calls fired every 100 ms while the bus
+                                  * was merely busy, so the bus got parked for no
+                                  * reason and the angle stalled in bursts. */
 
 /* How many raw LSB (16384 per turn) the wheel can cover per microsecond, times
  * ten so the limit stays integer maths: 7 is 0.7 LSB/us, i.e. 2560 rpm. The
@@ -373,7 +376,8 @@ void mid_enc_update(void)
              * that aborted the frame mid-shift, which is what left the MT6701
              * stuck at bit 8 (docs/00 #052, #053). Just wait for the DMA. */
             s_enc.late++;
-            if (++s_late_run >= ENC_LATE_RESYNC) {
+            ++s_late_run;
+            if ((bsp_prof_now() - s_t_enc) > (ENC_WEDGE_US * PHASE_CYC_PER_US)) {
                 s_late_run = 0u;
                 bsp_ssi_force_resync();     /* wedged, not slow */
             }
