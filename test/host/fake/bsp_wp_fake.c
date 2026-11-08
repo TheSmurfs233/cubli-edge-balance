@@ -67,6 +67,19 @@ void bsp_wp_on_monitor(const volatile uint32_t *frame)
     ++s_hits;
 }
 
+uint8_t fake_wp_self_test_ret = 1u;
+
+uint8_t bsp_wp_self_test(void)
+{
+    /* The host has no comparator: pretend the deliberate write was caught so
+     * the console path can be exercised. */
+    if (fake_wp_self_test_ret != 0u)
+    {
+        ++s_hits;
+    }
+    return fake_wp_self_test_ret;
+}
+
 uint8_t bsp_wp_print(void)
 {
     log_printf("wp   = hits %u, bad %u, armed %u, addr %x", (unsigned)s_hits,

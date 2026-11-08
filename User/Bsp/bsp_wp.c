@@ -20,9 +20,12 @@
 #include "bsp_wp.h"
 #include "mid_log.h"
 
-/* ARMv7-M DWT_FUNCTION: 0x3 = watchpoint on data address write.
- * The comparator holds the address because DATAVADDR0 is zero (no chaining). */
-#define WP_FN_WRITE 0x3u
+/* ARMv7-M DWT_FUNCTION: 0b0101 = EMIT PC on a data write, with the access
+ * size taken from DATAVSIZE (0b10 = word). The 0x3 that used to sit here means
+ * "data read/write with the linked comparator DATAVADDR0", which never matches
+ * unless that comparator is programmed too - that is why hits stayed at 0. */
+#define WP_FN_WRITE 0x5u
+#define WP_DATAVSIZE_WORD (2u << 10)
 
 /* Backup-register slots 23..28 are shared with the crash module's stack
  * window: a real fault overwrites them, which is the right priority - we would
@@ -82,7 +85,7 @@ void bsp_wp_arm(uint32_t addr, uint32_t good)
 
     DWT->COMP0     = addr;
     DWT->MASK0     = 0u;
-    DWT->FUNCTION0 = WP_FN_WRITE;
+    DWT->FUNCTION0 = WP_DATAVSIZE_WORD | WP_FN_WRITE;
 
     s_armed = 1u;
 }
@@ -120,6 +123,35 @@ void bsp_wp_clear(void)
 
     wp_publish();
     *wp_slot(WP_SLOT_MAGIC) = 0u;
+}
+
+/* Writes the watched word on purpose and reports whether the comparator
+ * fired. This is the self check that was missing: without it a wrong FUNCTION
+ * encoding looks exactly like "nothing ever writes that word". The value is
+ * restored and the watchpoint re-armed whatever the outcome. */
+uint8_t bsp_wp_self_test(void)
+{
+    volatile uint32_t *word;
+    uint32_t addr = s_addr;
+    uint8_t  fired;
+
+    if (s_armed == 0u)
+    {
+        bsp_wp_arm(addr, s_good);
+    }
+
+    addr = s_addr;
+    s_hits = 0u;
+    word = (volatile uint32_t *)(uintptr_t)addr;
+
+    *word = 0x0BADF00Du;
+
+    fired = (uint8_t)(s_hits != 0u);
+
+    *word = s_good;
+    bsp_wp_arm(addr, s_good);
+
+    return fired;
 }
 
 void bsp_wp_on_monitor(const volatile uint32_t *frame)

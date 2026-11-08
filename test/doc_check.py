@@ -116,6 +116,29 @@ for p in DOCS + PROCDOCS:
         if len(t) > 2 and not t.endswith('|'):
             err('%s:%d table row not closed with |' % (rel(p), n))
 
+# ------------------------------------- 3b. table split by a blank line
+for p in DOCS + PROCDOCS:
+    lines = read(p).splitlines()
+    in_fence = False
+    for n in range(1, len(lines) - 1):
+        t = lines[n].strip()
+        if t.startswith('`'):
+            in_fence = not in_fence
+            continue
+        if in_fence or not t.startswith('|'):
+            continue
+        if lines[n - 1].strip() != '':
+            continue
+        prev = ''
+        for k in range(n - 2, -1, -1):
+            if lines[k].strip() != '':
+                prev = lines[k].strip()
+                break
+        nxt = lines[n + 1].strip()
+        is_sep = nxt.startswith('|') and set(nxt) <= set('|-: ')
+        if prev.startswith('|') and not is_sep:
+            err('%s:%d table split by a blank line' % (rel(p), n + 1))
+
 # ------------------------------------------- 4. table column consistency
 CELL_SPLIT = re.compile(r'(?<!\\)\|')
 

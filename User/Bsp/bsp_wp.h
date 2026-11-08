@@ -41,6 +41,9 @@ void bsp_wp_on_monitor(const volatile uint32_t *frame);
 /* Print the captured record. Returns 1 when something was captured. */
 uint8_t bsp_wp_print(void);
 
+/* Deliberate write to the watched word: 1 when the comparator fired. */
+uint8_t bsp_wp_self_test(void);
+
 /* Forget the captured record (keeps the arming state). */
 void bsp_wp_clear(void);
 

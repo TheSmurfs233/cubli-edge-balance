@@ -1972,6 +1972,19 @@ static void test_cmd(void)
     tx_clear();
     cmd_feed("wp clear\n");
     T(tx_contains("OK wp cleared"));
+    /* The self test is what turns "nothing ever writes that word" into a
+     * measurement: a silently mis-encoded comparator never fires, so the
+     * command has to prove that it can. */
+    tx_clear();
+    extern uint8_t fake_wp_self_test_ret;
+    fake_wp_self_test_ret = 1u;
+    cmd_feed("wp test\n");
+    T(tx_contains("OK wp test"));
+    tx_clear();
+    fake_wp_self_test_ret = 0u;
+    cmd_feed("wp test\n");
+    T(tx_contains("ERR wp test"));
+    fake_wp_self_test_ret = 1u;
     if (g_fails != g_fail_mark) { tx_dump_on_fail(); }
     section_end();
 

@@ -110,9 +110,15 @@ static const uint32_t *crash_find_frame(const uint32_t *base)
         if ((f[7] >> 24) == 0u)         { continue; }
         if (f[6] < 0x08000000u)         { continue; }
         if (f[6] >= 0x08020000u)        { continue; }
+        /* Thumb bit: every instruction address in this image is odd. A stacked
+         * PC that is even means the "frame" is somebody's local variable that
+         * happens to look plausible - the 20:38 record claimed a BEQ faulted,
+         * which cannot happen. */
+        if ((f[6] & 1u) == 0u)          { continue; }
+        if (((f[5] & 1u) == 0u) && (f[5] != 0u)) { continue; }
         return f;
     }
-    return base;
+    return NULL;
 }
 
 /* 0 means "no alias armed", which is also what a zero word would look like; the
@@ -138,6 +144,32 @@ void bsp_crash_capture(uint32_t kind)
     frame = crash_find_frame((const uint32_t *)__get_MSP());
 
     crash_store(CRASH_SLOT_KIND,  kind);
+
+    if (frame == NULL)
+    {
+        /* No believable frame: record the fact instead of a fake PC. The
+         * hardware CFSR/BFAR plus the latched R4-R11 still tell the story. */
+        crash_store(CRASH_SLOT_PC,  0xFFFFFFFFu);
+        crash_store(CRASH_SLOT_LR,  0xFFFFFFFFu);
+        crash_store(CRASH_SLOT_PSR, 0xFFFFFFFFu);
+        crash_store(CRASH_SLOT_R0,  0u);
+        crash_store(CRASH_SLOT_R1,  0u);
+        crash_store(CRASH_SLOT_R2,  0u);
+        crash_store(CRASH_SLOT_R3,  0u);
+        crash_store(CRASH_SLOT_R12, 0u);
+        crash_store(CRASH_SLOT_SP,  (uint32_t)__get_MSP());
+        for (uint32_t i = 0u; i < 8u; ++i)
+        {
+            crash_store(CRASH_SLOT_R4 + i, crash_live_regs[i]);
+        }
+        crash_store(CRASH_SLOT_CFSR,  SCB->CFSR);
+        crash_store(CRASH_SLOT_HFSR,  SCB->HFSR);
+        crash_store(CRASH_SLOT_MMFAR, SCB->MMFAR);
+        crash_store(CRASH_SLOT_BFAR,  SCB->BFAR);
+        crash_store(CRASH_SLOT_STK0, 0xFFFFFFFFu);
+        crash_store(CRASH_SLOT_STK0 + 1u, 0xFFFFFFFFu);
+        return;
+    }
     crash_store(CRASH_SLOT_PC,    frame[6]);
     crash_store(CRASH_SLOT_LR,    frame[5]);
     crash_store(CRASH_SLOT_PSR,   frame[7]);
