@@ -770,9 +770,18 @@ extern "C" {
  * -> 0 rpm in 17 s with the body moving less than 0.05 deg, k = 1e-3 -> 5 s but
  * 3.11 deg of lean. 3e-4 chosen. 0 freezes the trim and leaves "bal trim" in
  * charge. */
-#define BAL_TRIM_W_K            0.0f     /* off until the guards below are proven on the bench */
+#define BAL_TRIM_W_K            3e-4f    /* on again 2026-11-10: the encoder that made the
+                                          * 2026-11-06 runaway possible is fixed (rotating
+                                          * crc 0.046%, badrun 0), and app_bal_update() now
+                                          * freezes the walk when the encoder reading is
+                                          * stale or invalid. "bal walk <k>" retunes it live. */
 #define BAL_TRIM_GATE_DEG       4.0f    /* outside this the body is still being
                                          * captured; do not lean it further */
+
+/* The wheel walk is frozen when the encoder reading has not advanced for this
+ * long. At 20 kHz a healthy link advances every 50 us, so 100 ms is 2000
+ * frames: only a dead or wedged reader trips it. */
+#define BAL_WALK_STALE_MS       100u
 
 /* Attitude frame period: the adaptation is advanced once per new 0x41 frame. */
 #define BAL_FRAME_DT_S          0.005f

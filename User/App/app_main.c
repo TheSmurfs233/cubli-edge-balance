@@ -336,6 +336,8 @@ static app_bal_info_t *volatile s_bal_p = &s_bal;
 static uint8_t        s_bal_on;
 static uint32_t       s_bal_seq_prev;   /* attitude frame seen by the last update */
 static uint8_t        s_bal_auto = 1u;  /* whether the wheel may walk the trim  */
+static uint32_t       s_enc_frames_prev;/* encoder frames at the last check     */
+static uint32_t       s_enc_frame_ms;   /* tick of the last encoder frame       */
 static uint8_t        s_learn_done;     /* one-shot zero learn already taken    */
 
 static void bal_cfg_load(void)
@@ -573,7 +575,13 @@ void app_bal_update(void)
         (run_p()->state == BAL_ST_RUN))
     {
         s_bal_seq_prev = a->seq;
-        alg_bal_adapt(BAL_FRAME_DT_S);
+        /* The 2026-11-06 runaway happened because a frozen wheel reading was
+         * trusted: the walk then integrated a constant and parked the trim on
+         * its clamp. Only walk on a reading that is valid and still moving. */
+        if (app_bal_walk_ready() != 0u)
+        {
+            alg_bal_adapt(BAL_FRAME_DT_S);
+        }
     }
 
     bal_p()->valid       = 1u;
@@ -643,6 +651,37 @@ void app_bal_trim_learn(float deg)
 void app_bal_auto_set(uint8_t on)
 {
     s_bal_auto = (on != 0u) ? 1u : 0u;
+}
+
+float app_bal_walk_set(float k)
+{
+    return alg_bal_trim_wk_set(k);
+}
+
+float app_bal_walk_get(void)
+{
+    return alg_bal_trim_wk_get();
+}
+
+uint8_t app_bal_walk_ready(void)
+{
+    const mid_enc_t *e   = mid_enc_info();
+    uint32_t         now = HAL_GetTick();
+
+    if (e->frames != s_enc_frames_prev)
+    {
+        s_enc_frames_prev = e->frames;
+        s_enc_frame_ms    = now;
+    }
+    if (e->valid == 0u)
+    {
+        return 0u;                       /* no angle has ever been decoded */
+    }
+    if ((uint32_t)(now - s_enc_frame_ms) > (uint32_t)BAL_WALK_STALE_MS)
+    {
+        return 0u;                       /* the reading stopped advancing  */
+    }
+    return 1u;
 }
 
 uint8_t app_bal_auto_get(void)

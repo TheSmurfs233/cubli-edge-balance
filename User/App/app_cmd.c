@@ -173,6 +173,7 @@ static void print_help(void)
     log_printf(" bal trim <deg> move the zero so the wheel stops winding up");
     log_printf(" bal snap       one step: trim -= wheel / 573 rpm-per-deg");
     log_printf(" bal auto [on|off] let the wheel speed walk the zero (default on)");
+    log_printf(" bal walk <k>   walk gain, deg per rpm per s (0 freezes, max 0.01)");
     log_printf(" bal run [on|off] closed loop with interlocks -- moves the motor");
     log_printf(" imu rate <hz> [save]  set the 0x41 AHRS packet rate (10..200)");
     log_printf(" imu cfg <text> forward one ASCII config command (e.g. imu cfg #fmsg)");
@@ -777,7 +778,7 @@ static void print_bal(void)
                (double)BAL_TRIM_MAX_DEG, (double)BAL_FF_MNM);
     log_printf(" auto   = %s, wheel walk %.0f e-6 deg per rpm per s, gate %.1f deg",
                (app_bal_auto_get() != 0u) ? "on" : "off (manual trim)",
-               (double)(BAL_TRIM_W_K * 1000000.0f), (double)BAL_TRIM_GATE_DEG);
+               (double)(app_bal_walk_get() * 1000000.0f), (double)BAL_TRIM_GATE_DEG);
 }
 
 /* Print one row per sample while the user rocks the cube by hand.
@@ -1090,6 +1091,19 @@ static float   s_pll_zeta = PLL_ZETA;
                            (app_bal_auto_get() != 0u) ? "on" : "off");
             } else {
                 log_printf("ERR usage=bal auto <on|off>");
+            }
+        } else if ((n >= 2u) && (strcmp(tok[1], "walk") == 0)) {
+            float k = 0.0f;
+            if ((n >= 3u) && (parse_num(tok[2], &k) != 0u)) {
+                k = app_bal_walk_set(k);
+                log_printf("OK bal walk %d e-6 deg per rpm per s%s",
+                           (int)((k * 1000000.0f) + 0.5f),
+                           (k <= 0.0f) ? " (frozen)" : "");
+            } else if (n < 3u) {
+                log_printf(" walk   = %d e-6 deg per rpm per s (max 10000), usage=bal walk <k>",
+                           (int)((app_bal_walk_get() * 1000000.0f) + 0.5f));
+            } else {
+                log_printf("ERR usage=bal walk <k>");
             }
         } else if ((n >= 2u) && (strcmp(tok[1], "snap") == 0)) {
             uint8_t rc = app_bal_snap();

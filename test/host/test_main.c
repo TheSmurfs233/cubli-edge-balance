@@ -3523,6 +3523,38 @@ static void test_bal(void)
     T(b->saturated == 0u);
     section_end();
 
+    section("bal walk: gain settable, and the walk needs a fresh encoder");
+    /* Compile-time default is the chosen 3e-4 (docs/45 4.17). */
+    T(fabsf(app_bal_walk_get() - 3.0e-4f) < 1.0e-9f);
+    tx_clear();
+    cmd_feed("bal walk 0\r\n");
+    pump_all();
+    T(tx_contains("OK bal walk"));
+    T(app_bal_walk_get() == 0.0f);
+    tx_clear();
+    cmd_feed("bal walk 0.0003\r\n");
+    pump_all();
+    T(tx_contains("OK bal walk 300 e-6"));
+    T(fabsf(app_bal_walk_get() - 3.0e-4f) < 1.0e-9f);
+    /* A console must not be able to push the gain high enough to ram the
+     * trim into its clamp: 0.5 is clamped to the 1e-2 ceiling, a negative
+     * value freezes the walk. */
+    T(fabsf(app_bal_walk_set(0.5f) - 1.0e-2f) < 1.0e-9f);
+    T(app_bal_walk_set(-1.0f) == 0.0f);
+    (void)app_bal_walk_set(3.0e-4f);
+    tx_clear();
+    cmd_feed("bal\r\n");
+    pump_all();
+    T(tx_contains("wheel walk"));
+    /* Freshness: the walk freezes as soon as the reading stops advancing. */
+    (void)app_bal_walk_ready();          /* seeds the frame stamp           */
+    fake_tick_add((uint32_t)BAL_WALK_STALE_MS + 50u);
+    T(app_bal_walk_ready() == 0u);
+    enc_build_frame(2000u, 0u);
+    mid_enc_update();
+    T(app_bal_walk_ready() == 1u);
+    section_end();
+
     section("bal: shadow mode never drives the motor");
     T(app_torque_get() == 0.0f);
     T(app_foc_info()->iq_ref == 0.0f);

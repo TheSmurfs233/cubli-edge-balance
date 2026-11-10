@@ -335,6 +335,12 @@ float app_bal_trim_set(float deg);
 float app_bal_trim_get(void);
 void  app_bal_trim_learn(float deg);
 void  app_bal_auto_set(uint8_t on);
+
+/* Wheel-walk gain in deg per rpm per second (0 = frozen), and the freshness
+   test the balance path runs before it lets the walk move the trim. */
+float    app_bal_walk_set(float k);
+float    app_bal_walk_get(void);
+uint8_t  app_bal_walk_ready(void);
 uint8_t app_bal_auto_get(void);
 /* One fixed-point step that centres the body so the wheel can stop:
  *     trim -= omega_rpm / (kp/kw in rpm per degree)

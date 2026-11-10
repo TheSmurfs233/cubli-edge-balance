@@ -111,6 +111,23 @@ float alg_bal_trim_set(float deg);
 /** @brief Current trim, deg. */
 float alg_bal_trim_deg(void);
 
+/**
+  * @brief  Set the wheel-walk gain at runtime ("bal walk <k>").
+  *
+  * Units are deg per rpm per second, same as trim_w_k in alg_bal_cfg_t. 0
+  * freezes the walk. Negative and NaN collapse to 0, anything above
+  * ALG_BAL_TRIM_WK_MAX is clamped, because the caller is a console.
+  *
+  * @return the value actually stored
+  */
+float alg_bal_trim_wk_set(float k);
+
+/** @brief Current wheel-walk gain, deg per rpm per second. */
+float alg_bal_trim_wk_get(void);
+
+/** @brief Upper bound accepted by alg_bal_trim_wk_set (1e-2). */
+#define ALG_BAL_TRIM_WK_MAX   1.0e-2f
+
 /** @brief 1 = a valid tuning set has been loaded. */
 uint8_t alg_bal_ready(void);
 

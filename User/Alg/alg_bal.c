@@ -209,6 +209,25 @@ float alg_bal_trim_set(float deg)
   return deg;
 }
 
+float alg_bal_trim_wk_set(float k)
+{
+  if (!(k > 0.0f))
+  {
+    k = 0.0f;            /* negative and NaN both freeze the walk */
+  }
+  if (k > ALG_BAL_TRIM_WK_MAX)
+  {
+    k = ALG_BAL_TRIM_WK_MAX;
+  }
+  s_cfg.trim_w_k = k;
+  return s_cfg.trim_w_k;
+}
+
+float alg_bal_trim_wk_get(void)
+{
+  return s_cfg.trim_w_k;
+}
+
 float alg_bal_trim_deg(void)
 {
   return s_out.trim_deg;
