@@ -770,11 +770,17 @@ extern "C" {
  * -> 0 rpm in 17 s with the body moving less than 0.05 deg, k = 1e-3 -> 5 s but
  * 3.11 deg of lean. 3e-4 chosen. 0 freezes the trim and leaves "bal trim" in
  * charge. */
-#define BAL_TRIM_W_K            3e-4f    /* on again 2026-11-10: the encoder that made the
-                                          * 2026-11-06 runaway possible is fixed (rotating
-                                          * crc 0.046%, badrun 0), and app_bal_update() now
-                                          * freezes the walk when the encoder reading is
-                                          * stale or invalid. "bal walk <k>" retunes it live. */
+/* 2026-11-11: back to 0 on the bench. With 3e-4 the reference walked into
+ * its -3.00 deg clamp while the wheel stayed at +405 rpm, and the cube sat in
+ * a 1.6 s limit cycle. sim/s6_walk_stab.py says the law should converge, so the
+ * bench behaviour is tracked as an open question (docs/18#T29); keep it manual
+ * until that is answered. "bal walk <k>" still turns it on at run time. */
+#define BAL_TRIM_W_K            0.0f    /* 0 = walk off, "bal trim" in charge. */
+/* Tried 3e-4 again on 2026-11-10 once the encoder was clean: on the bench the
+ * reference walked into its -3.00 deg clamp while the wheel stayed at +405 rpm
+ * and the cube sat in a 1.6 s limit cycle (docs/00#079). sim/s6_walk_stab.py
+ * still says the law should settle, so the difference is an open question
+ * (docs/18#T29) - keep the default at 0 and use "bal walk <k>" for experiments. */
 #define BAL_TRIM_GATE_DEG       4.0f    /* outside this the body is still being
                                          * captured; do not lean it further */
 
