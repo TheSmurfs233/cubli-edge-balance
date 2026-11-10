@@ -122,6 +122,7 @@ void alg_bal_adapt(float dt_s)
   float lim;
   float gate;
   float rpm;
+  float rel_deg;
 
   s_trim_rad_prev = s_trim_rad;
 
@@ -139,10 +140,16 @@ void alg_bal_adapt(float dt_s)
   {
     gate = s_cfg.trim_gate_deg;
   }
-  if ((gate > 0.0f) && ((s_phi_deg > gate) || (s_phi_deg < -gate)))
+  /* The guard is about the loop error, not about the absolute tilt: a machine
+     standing steadily at a cable-induced offset has a large |phi| but a tiny
+     |phi - trim|, and that is exactly the case the walk exists to remove.
+     2026-11-11 bench: the absolute form froze the walk at |phi| = 2.6 deg (USB
+     lead pulling) with the wheel parked at 200 rpm and trim at its clamp. */
+  rel_deg = s_phi_deg - (s_trim_rad * 57.29577951f);
+  if ((gate > 0.0f) && ((rel_deg > gate) || (rel_deg < -gate)))
   {
-    /* Outside the window the balance loop owns the machine; a trim change here
-       would lean the body while it is still being captured. */
+    /* Still capturing: the balance loop owns the machine, a trim change here
+       would lean the body while it is being pulled upright. */
     return;
   }
 

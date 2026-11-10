@@ -776,9 +776,9 @@ static void print_bal(void)
     log_printf(" zero   = trim %s%.2f deg (max %.1f), friction ff %.2f mN.m",
                (b->trim_deg < 0.0f) ? "-" : "+", (double)fabsf(b->trim_deg),
                (double)BAL_TRIM_MAX_DEG, (double)BAL_FF_MNM);
-    log_printf(" auto   = %s, wheel walk %.0f e-6 deg per rpm per s, gate %.1f deg",
+    log_printf(" auto   = %s, wheel walk %.0f e-6 deg per rpm per s, gate %.2f deg",
                (app_bal_auto_get() != 0u) ? "on" : "off (manual trim)",
-               (double)(app_bal_walk_get() * 1000000.0f), (double)BAL_TRIM_GATE_DEG);
+               (double)(app_bal_walk_get() * 1000000.0f), (double)BAL_WALK_PHI_GATE_DEG);
 }
 
 /* Print one row per sample while the user rocks the cube by hand.

@@ -63,6 +63,9 @@ static alg_bal_cfg_t cfg_make(float sign, float max_nm)
   c.trim_clamp_deg = 0.0f;
   c.trim_gate_deg = 0.0f;
   c.trim_w_k = 0.0f;
+  c.walk_step_deg = 0.0f;      /* 0 = fall back to 0.01 deg per call */
+  c.walk_deadband_rpm = 0.0f;  /* 0 = no deadband */
+  c.walk_phi_gate_deg = 0.0f;  /* 0 = fall back to trim_gate_deg */
 
   return c;
 }
@@ -74,7 +77,7 @@ int main(void)
   const alg_bal_out_t *last;
   int i;
 
-  printf("bal_test: 20 cases (kp %.3f kd %.4f kw %.1e max %.4f)\n",
+  printf("bal_test: 21 cases (kp %.3f kd %.4f kw %.1e max %.4f)\n",
          KP, KD, KW, MAX_NM);
 
   /* 1. init with a valid set: ready, zero output, zero steps */
@@ -290,6 +293,38 @@ int main(void)
   chk((absf(alg_bal_trim_deg() - 0.5f) < 1e-4f) &&
       (near_mnm(out.tau_nm, -KP * 0.5f * DEG2RAD * 1000.0f, 0.05f) != 0),
       "20c a manual trim offsets the law by kp * trim");
+
+  /* 21. the gate looks at the loop error (phi - trim), not at the raw tilt:
+   *     a body parked at a cable-induced offset has a large |phi| but a tiny
+   *     error, and that is the case the walk exists to remove.  Bench
+   *     2026-11-11: the absolute form froze the walk at |phi| = 2.6 deg with the
+   *     wheel parked at 200 rpm and the trim sitting on its clamp. */
+  cfg = cfg_make(1.0f, 1.0f);           /* 1 N.m: never saturates here */
+  cfg.trim_clamp_deg = 3.0f;
+  cfg.trim_gate_deg = 4.0f;
+  cfg.walk_phi_gate_deg = 2.0f;
+  cfg.trim_w_k = 2.0e-4f;
+  cfg.walk_step_deg = 0.05f;
+  cfg.walk_deadband_rpm = 40.0f;
+
+  alg_bal_init(&cfg);
+  (void)alg_bal_trim_set(-2.5f);
+  for (i = 0; i < 200; i++)             /* phi == trim: parked on the offset */
+  {
+    alg_bal_step(-2.5f * DEG2RAD, 0.0f, 200.0f * RPM2RPS, &out);
+    alg_bal_adapt(0.5f);
+  }
+  chk(alg_bal_trim_deg() < -2.7f,
+      "21a a parked offset (phi == trim) still lets the walk move");
+
+  alg_bal_init(&cfg);
+  for (i = 0; i < 200; i++)             /* phi - trim = 6 deg: still capturing */
+  {
+    alg_bal_step(6.0f * DEG2RAD, 0.0f, 200.0f * RPM2RPS, &out);
+    alg_bal_adapt(0.5f);
+  }
+  chk(absf(alg_bal_trim_deg()) < 1e-6f,
+      "21b a large loop error still freezes the walk");
 
   printf("checks: %d  failed: %d\n", s_checks, s_failed);
   printf("RESULT: %s\n", (s_failed == 0) ? "PASS" : "FAIL");
