@@ -337,6 +337,7 @@ static uint8_t        s_bal_on;
 static uint32_t       s_bal_seq_prev;   /* attitude frame seen by the last update */
 static uint32_t       s_walk_div;       /* attitude frames since the last walk    */
 static uint8_t        s_bal_auto = 1u;  /* whether the wheel may walk the trim  */
+static float          s_walk_k = -1.0f; /* >= 0: runtime override of trim_w_k   */
 static uint32_t       s_enc_frames_prev;/* encoder frames at the last check     */
 static uint32_t       s_enc_frame_ms;   /* tick of the last encoder frame       */
 static uint8_t        s_learn_done;     /* one-shot zero learn already taken    */
@@ -360,6 +361,8 @@ static void bal_cfg_load(void)
     s_bal_cfg.walk_step_deg = BAL_WALK_STEP_DEG;
     s_bal_cfg.walk_deadband_rpm = BAL_WALK_DEADBAND_RPM;
     s_bal_cfg.walk_phi_gate_deg = BAL_WALK_PHI_GATE_DEG;
+    s_bal_cfg.walk_filt_tau_s   = BAL_WALK_FILT_TAU_S;
+    s_bal_cfg.frame_dt_s        = BAL_FRAME_DT_S;
 
     /* Threshold order is a safety property: ARM must sit inside TRIP, the
      * balance ceiling must stay below the torque interface, and the stale
@@ -590,6 +593,13 @@ void app_bal_update(void)
             s_walk_div = 0u;
             if (app_bal_walk_ready() != 0u)
             {
+                /* Re-assert the bench override if anything reloaded the
+                 * cfg underneath us (arm, reset, cfg reload). */
+                if ((s_walk_k >= 0.0f) &&
+                    (alg_bal_trim_wk_get() != s_walk_k))
+                {
+                    (void)alg_bal_trim_wk_set(s_walk_k);
+                }
                 alg_bal_adapt(BAL_WALK_DT_S);
             }
         }
@@ -666,6 +676,13 @@ void app_bal_auto_set(uint8_t on)
 
 float app_bal_walk_set(float k)
 {
+    /* "bal walk" is a bench knob: remember it so a later arm or a cfg
+     * reload cannot silently put the compiled default back. A negative
+     * value means "no override, use the compiled default". */
+    if (k >= 0.0f)
+    {
+        s_walk_k = k;
+    }
     return alg_bal_trim_wk_set(k);
 }
 

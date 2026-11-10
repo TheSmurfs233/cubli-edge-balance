@@ -79,6 +79,8 @@ void alg_bal_init(const alg_bal_cfg_t *cfg)
   s_cfg.trim_clamp_deg  = 0.0f;
   s_cfg.trim_gate_deg   = 0.0f;
   s_cfg.trim_w_k        = 0.0f;
+  s_cfg.walk_filt_tau_s = 0.0f;
+  s_cfg.frame_dt_s      = 0.0f;
   s_ready         = 0u;
 
   if (cfg != 0)
@@ -97,6 +99,14 @@ void alg_bal_init(const alg_bal_cfg_t *cfg)
   alg_bal_reset();
 }
 
+/* Slow low pass on the wheel speed, used only by the trim walk.  The raw
+ * speed carries the 12 s hunting mode that the walk itself excites (bench
+ * 2026-11-11: gain 2e-4 at 2 Hz produced a stable +/-280 rpm limit cycle,
+ * freezing the walk collapsed it to a steady 270 rpm), so the outer loop
+ * must look at the slow component, not at the wobble it is causing. */
+static float s_omega_filt_rps;
+static uint8_t s_filt_primed;
+
 void alg_bal_reset(void)
 {
   s_out.tau_nm     = 0.0f;
@@ -113,6 +123,8 @@ void alg_bal_reset(void)
   s_trim_rad       = s_cfg.trim_deg * 0.01745329252f;
   s_out.trim_deg   = s_cfg.trim_deg;
   s_phi_deg        = 0.0f;
+  s_omega_filt_rps = 0.0f;
+  s_filt_primed    = 0u;
 }
 
 static float s_trim_rad_prev;
@@ -165,7 +177,8 @@ void alg_bal_adapt(float dt_s)
     return;
   }
 
-  rpm = s_out.omega_rps * 9.5492966f;
+  /* Walk on the filtered speed (see s_omega_filt_rps). */
+  rpm = s_omega_filt_rps * 9.5492966f;
 
   /* No walk below the deadband: the wheel is already where we want it and the
    * sign of a 20 rpm reading is noise. */
@@ -308,6 +321,32 @@ void alg_bal_step(float phi_rad, float dphi_rps, float omega_rps,
   s_out.phi_rad   = phi_rad;
   s_out.dphi_rps  = dphi_rps;
   s_out.omega_rps = omega_rps;
+
+  if (s_cfg.walk_filt_tau_s > 0.0f)
+  {
+    float dt_s = s_cfg.frame_dt_s;
+    float a;
+    if (dt_s <= 0.0f)
+    {
+      dt_s = 0.005f;
+    }
+    a = dt_s / (s_cfg.walk_filt_tau_s + dt_s);
+    if (a > 1.0f)
+    {
+      a = 1.0f;
+    }
+    if (s_filt_primed == 0u)
+    {
+      s_omega_filt_rps = omega_rps;   /* start on the real value */
+      s_filt_primed    = 1u;
+    }
+    s_omega_filt_rps += a * (omega_rps - s_omega_filt_rps);
+  }
+  else
+  {
+    s_omega_filt_rps = omega_rps;
+    s_filt_primed    = 1u;
+  }
   s_out.trim_deg  = s_trim_rad * 57.2957795f;
   s_out.saturated = saturated;
   s_out.deadband  = deadband;

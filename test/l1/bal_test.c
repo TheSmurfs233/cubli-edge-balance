@@ -76,6 +76,9 @@ int main(void)
   alg_bal_out_t out;
   const alg_bal_out_t *last;
   int i;
+  float t0;
+  float d1;
+  float d2;
 
   printf("bal_test: 21 cases (kp %.3f kd %.4f kw %.1e max %.4f)\n",
          KP, KD, KW, MAX_NM);
@@ -325,6 +328,35 @@ int main(void)
   }
   chk(absf(alg_bal_trim_deg()) < 1e-6f,
       "21b a large loop error still freezes the walk");
+
+  /* 22: the walk integrates the filtered wheel speed, not the raw one.  A
+   * single 400 rpm spike must not move the trim; a sustained 400 rpm must. */
+  cfg = cfg_make(1.0f, MAX_NM);
+  cfg.trim_w_k = 1.0e-4f;
+  cfg.walk_filt_tau_s = 3.0f;
+  cfg.walk_step_deg = 0.05f;
+  cfg.walk_phi_gate_deg = 10.0f;
+  cfg.trim_gate_deg = 10.0f;
+  alg_bal_init(&cfg);
+  alg_bal_step(0.0f, 0.0f, 0.0f, &out);      /* prime the filter at 0 */
+  t0 = alg_bal_trim_deg();
+  alg_bal_step(0.0f, 0.0f, 41.9f, &out);     /* one step at 400 rpm   */
+  alg_bal_adapt(0.5f);
+  d1 = alg_bal_trim_deg() - t0;
+  chk((d1 < 0.0f) && (absf(d1) < 0.01f),
+      "22a one raw spike barely moves the trim");
+  for (i = 0; i < 1500; i++)                  /* 7.5 s at 400 rpm      */
+  {
+    alg_bal_step(0.0f, 0.0f, 41.9f, &out);
+  }
+  t0 = alg_bal_trim_deg();
+  for (i = 0; i < 4; i++)                     /* 4 walk calls = 2 s    */
+  {
+    alg_bal_step(0.0f, 0.0f, 41.9f, &out);
+    alg_bal_adapt(0.5f);
+  }
+  d2 = alg_bal_trim_deg() - t0;
+  chk((d2 < -0.01f), "22b a sustained 400 rpm does walk the trim down");
 
   printf("checks: %d  failed: %d\n", s_checks, s_failed);
   printf("RESULT: %s\n", (s_failed == 0) ? "PASS" : "FAIL");

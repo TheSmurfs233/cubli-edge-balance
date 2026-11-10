@@ -45,6 +45,8 @@ typedef struct
                               walked by the wheel speed; 0 = frozen     */
   float walk_step_deg;      /**< hard cap per alg_bal_adapt() call, deg   */
   float walk_deadband_rpm;  /**< no walk below this in either direction   */
+  float walk_filt_tau_s;    /**< low pass on omega, seconds (0 = off)   */
+  float frame_dt_s;         /**< nominal step between calls, seconds    */
   float walk_phi_gate_deg;  /**< walk only while |phi| stays under this;
                                  <= 0 falls back to trim_gate_deg         */
 } alg_bal_cfg_t;
