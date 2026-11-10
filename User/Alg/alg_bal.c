@@ -134,7 +134,11 @@ void alg_bal_adapt(float dt_s)
     return;
   }
 
-  gate = s_cfg.trim_gate_deg;
+  gate = s_cfg.walk_phi_gate_deg;
+  if (gate <= 0.0f)
+  {
+    gate = s_cfg.trim_gate_deg;
+  }
   if ((gate > 0.0f) && ((s_phi_deg > gate) || (s_phi_deg < -gate)))
   {
     /* Outside the window the balance loop owns the machine; a trim change here
@@ -155,13 +159,25 @@ void alg_bal_adapt(float dt_s)
   }
 
   rpm = s_out.omega_rps * 9.5492966f;
+
+  /* No walk below the deadband: the wheel is already where we want it and the
+   * sign of a 20 rpm reading is noise. */
+  if ((rpm < s_cfg.walk_deadband_rpm) && (rpm > -s_cfg.walk_deadband_rpm))
+  {
+    return;
+  }
+
   s_trim_rad -= (s_cfg.trim_w_k * rpm * 0.01745329252f) * dt_s;
 
   /* Hard rate cap: a bogus wheel reading must not be able to ram the reference
      into its clamp inside a second (0.01 deg per call at 200 Hz = 2 deg/s). */
   {
     float step = s_trim_rad - s_trim_rad_prev;
-    const float max_step = 0.01f * 0.01745329252f;
+    float max_step = s_cfg.walk_step_deg * 0.01745329252f;
+    if (max_step <= 0.0f)
+    {
+      max_step = 0.01f * 0.01745329252f;
+    }
     if (step > max_step)
     {
       s_trim_rad = s_trim_rad_prev + max_step;

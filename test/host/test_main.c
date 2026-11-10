@@ -3528,8 +3528,9 @@ static void test_bal(void)
     section_end();
 
     section("bal walk: gain settable, and the walk needs a fresh encoder");
-    /* Compile-time default is the chosen 3e-4 (docs/45 4.17). */
-    T(app_bal_walk_get() == 0.0f);
+    /* Compile-time default is BAL_TRIM_W_K; the walk itself is decimated
+     * to 2 Hz at the call site (docs/00#082). */
+    T(fabsf(app_bal_walk_get() - BAL_TRIM_W_K) < 1.0e-12f);
     tx_clear();
     cmd_feed("bal walk 0\r\n");
     pump_all();

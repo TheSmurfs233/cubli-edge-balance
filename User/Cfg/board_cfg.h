@@ -784,7 +784,10 @@ extern "C" {
  * a 1.6 s limit cycle. sim/s6_walk_stab.py says the law should converge, so the
  * bench behaviour is tracked as an open question (docs/18#T29); keep it manual
  * until that is answered. "bal walk <k>" still turns it on at run time. */
-#define BAL_TRIM_W_K            0.0f    /* 0 = walk off, "bal trim" in charge. */
+#define BAL_TRIM_W_K            2.0e-4f /* deg per rpm per second; the walk is
+                                         * called at 2 Hz with dt = 0.5 s, so
+                                         * one update moves trim by 1e-4 x rpm.
+                                         * 0 = walk off. See docs/00#082. */
 /* Tried 3e-4 again on 2026-11-10 once the encoder was clean: on the bench the
  * reference walked into its -3.00 deg clamp while the wheel stayed at +405 rpm
  * and the cube sat in a 1.6 s limit cycle (docs/00#079). sim/s6_walk_stab.py
@@ -797,6 +800,17 @@ extern "C" {
  * long. At 20 kHz a healthy link advances every 50 us, so 100 ms is 2000
  * frames: only a dead or wedged reader trips it. */
 #define BAL_WALK_STALE_MS       100u
+
+/* The walk used to run on every attitude frame (200 Hz) with k = 3e-4 and wound
+ * the trim onto its clamp in seconds. Simulation (sim/s7_trim_law.py) and a PC
+ * side experiment (docs/00#082) agree on the shape of a stable walk:
+ * one step per 0.5 s, at most 0.05 deg per step, and no step at all while the
+ * wheel is slow, the law saturates, or the body is being held. */
+#define BAL_WALK_DIV            100u    /* attitude frames per walk update  */
+#define BAL_WALK_DT_S           0.5f    /* 100 x 5 ms, matches BAL_WALK_DIV */
+#define BAL_WALK_STEP_DEG       0.05f   /* per update hard cap              */
+#define BAL_WALK_DEADBAND_RPM   40.0f   /* below this the walk stops        */
+#define BAL_WALK_PHI_GATE_DEG   2.0f    /* outside this the body is falling */
 
 /* Attitude frame period: the adaptation is advanced once per new 0x41 frame. */
 #define BAL_FRAME_DT_S          0.005f

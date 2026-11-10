@@ -335,6 +335,7 @@ static app_bal_info_t s_bal;
 static app_bal_info_t *volatile s_bal_p = &s_bal;
 static uint8_t        s_bal_on;
 static uint32_t       s_bal_seq_prev;   /* attitude frame seen by the last update */
+static uint32_t       s_walk_div;       /* attitude frames since the last walk    */
 static uint8_t        s_bal_auto = 1u;  /* whether the wheel may walk the trim  */
 static uint32_t       s_enc_frames_prev;/* encoder frames at the last check     */
 static uint32_t       s_enc_frame_ms;   /* tick of the last encoder frame       */
@@ -356,6 +357,9 @@ static void bal_cfg_load(void)
     s_bal_cfg.trim_clamp_deg = BAL_TRIM_MAX_DEG;
     s_bal_cfg.trim_gate_deg = BAL_TRIM_GATE_DEG;
     s_bal_cfg.trim_w_k = BAL_TRIM_W_K;
+    s_bal_cfg.walk_step_deg = BAL_WALK_STEP_DEG;
+    s_bal_cfg.walk_deadband_rpm = BAL_WALK_DEADBAND_RPM;
+    s_bal_cfg.walk_phi_gate_deg = BAL_WALK_PHI_GATE_DEG;
 
     /* Threshold order is a safety property: ARM must sit inside TRIP, the
      * balance ceiling must stay below the torque interface, and the stale
@@ -578,9 +582,16 @@ void app_bal_update(void)
         /* The 2026-11-06 runaway happened because a frozen wheel reading was
          * trusted: the walk then integrated a constant and parked the trim on
          * its clamp. Only walk on a reading that is valid and still moving. */
-        if (app_bal_walk_ready() != 0u)
+        /* The walk runs at 2 Hz, not once per frame. At 200 Hz with the old
+         * gain the reference moved faster than the body could follow and the
+         * loop wound the trim onto its clamp (docs/00#082, sim/s7_trim_law.py). */
+        if (++s_walk_div >= BAL_WALK_DIV)
         {
-            alg_bal_adapt(BAL_FRAME_DT_S);
+            s_walk_div = 0u;
+            if (app_bal_walk_ready() != 0u)
+            {
+                alg_bal_adapt(BAL_WALK_DT_S);
+            }
         }
     }
 

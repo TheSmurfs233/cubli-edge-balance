@@ -43,6 +43,10 @@ typedef struct
   float trim_gate_deg;   /**< adapt only while |phi| stays under this  */
   float trim_w_k;        /**< deg per rpm per second: the slow trim is
                               walked by the wheel speed; 0 = frozen     */
+  float walk_step_deg;      /**< hard cap per alg_bal_adapt() call, deg   */
+  float walk_deadband_rpm;  /**< no walk below this in either direction   */
+  float walk_phi_gate_deg;  /**< walk only while |phi| stays under this;
+                                 <= 0 falls back to trim_gate_deg         */
 } alg_bal_cfg_t;
 
 /**
