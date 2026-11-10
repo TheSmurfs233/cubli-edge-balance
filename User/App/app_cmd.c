@@ -841,7 +841,7 @@ static void print_bal_run(void)
     log_printf(" window = %u ms, frames %u, saturated %u",
                (unsigned)r->run_ms, (unsigned)r->frames, (unsigned)r->sat_frames);
     log_printf(" peaks  = phi %.2f deg, rate %.1f deg/s, wheel %.0f rpm",
-               (double)r->phi_peak_deg, (double)fabsf(b->dphi_dps),
+               (double)r->phi_peak_deg, (double)r->rate_peak_dps,
                (double)r->omega_peak_rpm);
     log_printf(" limits = arm %.1f deg / %.0f dps / %.0f rpm, trip %.0f deg / %.0f dps / %.0f rpm",
                (double)BAL_ARM_DEG, (double)BAL_ARM_DPS, (double)BAL_ARM_RPM,

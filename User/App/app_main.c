@@ -854,6 +854,7 @@ uint8_t app_balance_arm(uint8_t on)
     s_run.tau_peak_mnm   = 0.0f;
     s_run.phi_peak_deg   = 0.0f;
     s_run.omega_peak_rpm = 0.0f;
+    s_run.rate_peak_dps  = 0.0f;
     s_tau_cmd            = 0.0f;
     s_held_frames        = 0u;
     s_engage_wait        = 1u;
@@ -1086,6 +1087,7 @@ void app_balance_update(void)
     if (fabsf(tau) > s_run.tau_peak_mnm)          { s_run.tau_peak_mnm = fabsf(tau); }
     if (fabsf(a->theta_deg) > s_run.phi_peak_deg) { s_run.phi_peak_deg = fabsf(a->theta_deg); }
     if (fabsf(a->wheel_rpm) > s_run.omega_peak_rpm) { s_run.omega_peak_rpm = fabsf(a->wheel_rpm); }
+    if (fabsf(a->theta_dot_dps) > s_run.rate_peak_dps) { s_run.rate_peak_dps = fabsf(a->theta_dot_dps); }
 }
 
 /* Init                                                                */

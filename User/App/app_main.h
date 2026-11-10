@@ -403,6 +403,7 @@ typedef struct {
     float    tau_peak_mnm; /* max |command| this run                   */
     float    phi_peak_deg; /* max |theta| this run                     */
     float    omega_peak_rpm;
+    float    rate_peak_dps; /* max |body rate| this run, deg/s  */
     uint32_t run_ms;       /* since ARM                                */
     uint32_t frames;       /* frames that produced a new command       */
     uint32_t sat_frames;   /* frames where the law saturated           */
