@@ -748,6 +748,7 @@ static uint32_t      s_run_t0;
 static uint32_t      s_last_frames;
 static float         s_tau_cmd;
 static uint16_t      s_held_frames;  /* frames with a big torque but a static body */
+static float         s_held_phi;     /* angle when the current held run began      */
 static uint8_t       s_engage_wait;  /* armed, waiting for the operator to let go */
 static uint8_t       s_engage_cnt;   /* consecutive frames above the rate gate  */
 
@@ -1036,9 +1037,22 @@ void app_balance_update(void)
      * with a static body means the cube rests on something, and the wheel is the
      * only thing that will move. 28 mN.m for 0.35 s already saturates the wheel
      * window, so trip on it quickly and label it. */
-    if ((fabsf(tau) >= BAL_HELD_MNM) && (fabsf(a->theta_deg) >= BAL_HELD_DEG) &&
+    if ((s_run.run_ms >= (uint32_t)BAL_HELD_GRACE_MS) &&
+        (fabsf(tau) >= BAL_HELD_MNM) && (fabsf(a->theta_deg) >= BAL_HELD_DEG) &&
         (fabsf(a->theta_dot_dps) <= BAL_HELD_DPS))
     {
+        /* A slow oscillation also crosses zero rate. A hand does not move the
+         * angle at all, so restart the count whenever the body has moved since
+         * the run began (2026-11-11: a 2 s wobble tripped this detector). */
+        if (s_held_frames == 0u)
+        {
+            s_held_phi = a->theta_deg;
+        }
+        else if (fabsf(a->theta_deg - s_held_phi) > BAL_HELD_PHI_DEG)
+        {
+            s_held_frames = 0u;
+            s_held_phi    = a->theta_deg;
+        }
         if (s_held_frames < 0xFFFFu) { s_held_frames++; }
         if (((uint32_t)s_held_frames * 5u) >= (uint32_t)BAL_HELD_MS)
         {

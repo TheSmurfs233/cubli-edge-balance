@@ -869,9 +869,11 @@ extern "C" {
  * ramp the torque ceiling so an imperfect release position cannot become a
  * full-scale command. */
 #define BAL_KEY_HOLD_MS         3000u   /* still: hold this long = engage now */
-#define BAL_KEY_START_DELAY_MS  3000u   /* press+release -> engage after this */
+#define BAL_KEY_START_DELAY_MS  300u    /* press+release -> engage after this */
 #define BAL_ENGAGE_RAMP_MS      800u    /* soft start after engage            */
 #define BAL_HELD_MS             150u    /* 30 frames at 200 Hz               */
+#define BAL_HELD_GRACE_MS       800u    /* no held trip this soon after engage */
+#define BAL_HELD_PHI_DEG        0.30f   /* body must stay this still to count  */
 
 /* Engage-on-release. "bal run on" only arms: no torque flows until the body
  * actually starts to move, i.e. until the operator has let go. This removes the

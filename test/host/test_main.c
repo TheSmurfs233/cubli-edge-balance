@@ -3864,7 +3864,27 @@ static void test_s6(void)
             s6_pump();
         }
         T(app_balance_info()->engaged == 1u);
-        /* Then a big torque with a static body: the hand is still there. */
+        /* Inside the grace window the same signature must NOT trip: the first
+         * milliseconds after engage are the operator letting go. */
+        for (i = 0u; i < 20u; i++)
+        {
+            att_feed_rate(6.0f, 0.0f, seq);
+            seq++;
+            s6_pump();
+        }
+        T(app_balance_info()->state == BAL_ST_RUN);
+        /* A slow wobble is not a hand: rate stays under the gate but the angle
+         * keeps moving, so the detector must restart instead of tripping. */
+        fake_tick_add((uint32_t)BAL_HELD_GRACE_MS + 50u);
+        for (i = 0u; i < 60u; i++)
+        {
+            att_feed_rate(2.0f + ((float)i * 0.05f), 1.0f, seq);
+            seq++;
+            s6_pump();
+        }
+        T(app_balance_info()->state == BAL_ST_RUN);
+        /* Past the grace window a big torque with a static body is a hand. */
+        fake_tick_add((uint32_t)BAL_HELD_GRACE_MS + 50u);
         for (i = 0u; i < 40u; i++)
         {
             att_feed_rate(6.0f, 0.0f, seq);
