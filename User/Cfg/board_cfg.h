@@ -256,7 +256,10 @@ extern "C" {
 #define DBG_RX_BUF_SIZE         128u            /* DMA circular buffer (power of 2) */
 #define DBG_RX_RING_SIZE        1024u           /* parser ring buffer (power of 2) */
 #define DBG_TX_RING_SIZE        4096u           /* TX ring buffer (power of 2) */
-#define DBG_TX_DMA_CHUNK        64u             /* bytes per DMA transfer */
+/* 256 since 2026-11-11: one 24-channel FireWater row is ~265 B, so a 64 B
+ * chunk needed five pump rounds per row and the pacing test ran the ring
+ * dry. 256 B still leaves 4 KB of ring for the console replies. */
+#define DBG_TX_DMA_CHUNK        256u            /* bytes per DMA transfer */
 
 /* TX watchdog. One 64-byte chunk at 1Mbaud takes ~0.64 ms, so a completion
  * event that has not arrived 100 ms later is lost (UART error, DMA glitch).
@@ -275,7 +278,10 @@ extern "C" {
  *   500 Hz -> 22.0 kB/s (22% of 1Mbaud)   <- cap
  *  1000 Hz -> 44.0 kB/s (44% of 1Mbaud)   <- theoretical ceiling of
  *                                            HAL_GetTick (1ms), too tight */
-#define DBG_WAVE_RATE_MAX       500u
+/* 400 since 2026-11-11: 24 channels x ~230 B per row at 1 Mbaud leaves no
+ * headroom at 500 Hz, and vofa_send() drops a row rather than send half of
+ * one (L2 "frame pacing at max rate" caught it). */
+#define DBG_WAVE_RATE_MAX       400u
 /* Default = max: user asked to run at the highest rate by default.
  * Drop it with the "rate <hz>" command when a lighter stream is wanted. */
 #define DBG_WAVE_RATE_HZ        DBG_WAVE_RATE_MAX
@@ -467,7 +473,10 @@ extern "C" {
  *   19 back-EMF observer angle (deg), 20 observer-vs-encoder error (deg).
  * 21 channels * 5 B = 105 B per frame; at 500 Hz that is 52.5 kB/s of the
  * 100 kB/s the 1 Mbaud link provides. */
-#define WAVE_CH 21u
+/* 24 since 2026-11-11: ch21 = balance phi (deg), ch22 = the torque the
+ * balance loop applied (mN.m), ch23 = the trim in use (deg). Those three
+ * are what docs/18#T29 needs to compare tau against the wheel speed. */
+#define WAVE_CH 24u
 
 /* FOC current loop (S6).
  * Design start: R = 2.3 ohm/phase, L = 0.5 mH, fc = 500 Hz ->

@@ -3727,6 +3727,22 @@ static void task_wave(uint32_t now)
         ch[20] = de * 57.29577951308232f;
     }
 
+    /* S6/T29: the balance loop's own view, so a capture can put tau next to
+     * the wheel speed in the same time base. */
+    {
+        const app_bal_info_t *bi = app_bal_info();
+
+        if (bi != NULL) {
+            ch[21] = bi->phi_deg;
+            ch[22] = bi->tau_mnm;
+            ch[23] = bi->trim_deg;
+        } else {
+            ch[21] = 0.0f;
+            ch[22] = 0.0f;
+            ch[23] = 0.0f;
+        }
+    }
+
     if (vofa_send(ch, (uint8_t)WAVE_CH) != 0u) {
         s_st.wave_frames++;
     } else {

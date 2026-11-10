@@ -460,7 +460,7 @@ static void test_vofa(void)
 /* ================================================================== */
 static void test_uart(void)
 {
-    section("uart: TX chunking (64B per DMA)");
+    section("uart: TX chunking (DBG_TX_DMA_CHUNK per DMA)");
     tx_clear();
     {
         uint8_t buf[200];
@@ -472,8 +472,10 @@ static void test_uart(void)
         pump_all();
         T(fake_tx_len() == 200u);
         T(memcmp(fake_tx_data(), buf, 200u) == 0);
-        /* 200 bytes / 64 = 4 transfers (64,64,64,8) */
-        T((fake_tx_call_count() - before) == 4);
+        /* One DMA call per chunk; 2026-11-11: the chunk grew to 256 B so a
+         * 24-channel FireWater row leaves in two rounds instead of five. */
+        T((fake_tx_call_count() - before) ==
+          (int)((200u + DBG_TX_DMA_CHUNK - 1u) / DBG_TX_DMA_CHUNK));
     }
     section_end();
 
@@ -1875,6 +1877,8 @@ static void test_app(void)
     section("app: wave rate clamping (FireWater max)");
     app_wave_set(1u, 3000u);
     T(app_status()->wave_rate_hz == DBG_WAVE_RATE_MAX);   /* clamped to max */
+    /* 24 channels at 3 decimals: the CSV line must still fit mid_vofa's buffer */
+    T(WAVE_CH == 24u);
     app_wave_set(1u, 0u);
     T(app_status()->wave_rate_hz == 1u);                  /* clamped to min */
     app_wave_set(0u, 250u);
