@@ -871,7 +871,7 @@ uint8_t app_balance_arm(uint8_t on)
     s_run.engaged        = 0u;
     s_run.tau_applied_mnm = 0.0f;
     s_run_t0             = HAL_GetTick();
-    s_last_frames        = imu_ctx()->stat.frames;
+    s_last_frames        = imu_ctx()->stat.frames_ahrs;
     s_learn_done         = 0u;
     return 0u;
 }
