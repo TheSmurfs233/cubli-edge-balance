@@ -39,9 +39,11 @@ extern "C" {
  * Bonus: editing this header touches every file that includes board_cfg.h, so
  * bumping it forces a full rebuild and refreshes __DATE__/__TIME__ as well.
  *
- * The acceptance script (test/accept/s1_accept.py) greps this value out of the
- * source and compares it with what the board reports. */
-#define FW_BUILD_ID         1u
+ * Enforcement: test/check_build_id.py (gate 5 of test/verify.sh) fails when
+ * this value has no matching row in the docs/01 section 2.6 table. Add the row
+ * in the same commit as the bump; the row records id -> commit -> Code size.
+ * History: #1 = S1 baseline (64406), #2 = 2026-11-12 speed-zero release (90236). */
+#define FW_BUILD_ID         2u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM

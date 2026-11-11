@@ -69,16 +69,23 @@ Keil ARMCC V5 按 GBK 解析源文件，注释里出现中文极易触发 `#8: m
 | 新增/改宏、改阈值 | 该文档的参数表 + `docs/90_已知问题与限制.md`（若引入新限制） |
 | 任何阶段推进 | `docs/01_项目进度.md` + `docs/00_开发日志.md`（追加） |
 | 出现新的不确定项 | `docs/18_待确认清单.md` |
+| **改 `User/` 下任何固件（哪怕一个常数）** | **`FW_BUILD_ID` +1**（`User/Cfg/board_cfg.h`）+ `docs/01_项目进度.md` §2.6 加一行（id / 日期 / 提交 / Code / 说明） |
+
+> `FW_BUILD_ID` 是"板上跑的是哪一版"的**唯一权威**：`__DATE__`/`__TIME__` 会被增量编译冻住。
+> 门禁 `test/check_build_id.py` 会查这张表，漏记直接 FAIL。Bump 它还会强制全量重编，
+> 顺带刷新时间戳。
 
 ---
 
-## 5. 构建与测试（S0 尚未建立，S1 补齐）
+## 5. 构建与测试
 
 | 项 | 命令 | 期望 |
 |---|---|---|
-| 固件构建 | Keil UV4 命令行（S1 确定工程名） | 0 error 0 warning |
-| 主机测试 | `test/host/build.sh`（S1 建立） | `failed: 0` |
-| 文档检查 | `python test/doc_check.py`（S1 建立） | PASS |
+| 固件构建 | `Start-Process UV4.exe -ArgumentList '-r','cubli.uvprojx','-j0','-o',<日志文件名> -WorkingDirectory MDK-ARM` | 0 error 0 warning |
+| 一键门禁 | `bash test/verify.sh` | `RESULT: PASS (all 5 gates)` |
+| 主机测试 | `bash test/host/build.sh` | `failed: 0` |
+| 文档检查 | `python test/doc_check.py` | PASS |
+| 构建号检查 | `python test/check_build_id.py` | PASS（`FW_BUILD_ID` 已在 `docs/01` §2.6 登记） |
 | L1 仿真 | `D:\Embedded\STM32\cubli\.tmp_env\venv\Scripts\python.exe sim/xxx.py` | 断言通过 |
 
 > Keil 返回码：**0 = 成功，1 = 有警告，2 = 有错误**。每次构建**换一个日志文件名**，
