@@ -925,13 +925,15 @@ uint8_t app_balance_start_now(void)
         }
     }
 
-    /* Do NOT re-zero the attitude here. Taking the pose in the operator's hands
-     * as "upright" moves the whole reference with whatever error the hand has:
-     * 2026-11-11 it drifted to 42.81 deg, so a cube sitting on its edge read
-     * phi = +3.5 deg, the loop pushed the wrong way at full torque and the
-     * swing grew until it fell. ATT_OFFSET_DEG is the measured edge balance
-     * point; the trim walk absorbs the residual. Use "att zero" explicitly if
-     * a different edge is ever used. */
+    /* Re-zero the attitude frame on the pose the operator is holding, exactly as
+     * the 2026-11-07 builds did - that is what made every long run of that week
+     * start with a near-zero error. Without it the loop starts carrying a real
+     * 2-3 deg offset, kp asks for more than the ceiling from the first frame and
+     * the swing grows (bench 2026-11-11 23:16: 70 % of the frames saturated).
+     * The compiled ATT_OFFSET_DEG only matters while idle and for the arm
+     * window; the trim walk still has to find the true balance point. */
+    att_zero();
+
     if (s_run.frames == 0u)
     {
         log_printf("[BAL] engage: att zero %.2f deg (compiled %.2f), trim %.2f",
@@ -1038,9 +1040,8 @@ void app_balance_update(void)
          * over tens of seconds. Starting at trim 0 while the hand is 2-3 deg
          * off asked kp for more than the ceiling at once, which is what
          * produced the "two swings and fall" runs of 2026-11-11. */
-        (void)app_bal_trim_learn(a->theta_deg);
-        log_printf("[BAL] reference := pose %.2f deg (att zero %.2f)",
-                   (double)a->theta_deg, (double)att_offset_deg());
+        (void)app_bal_trim_learn(0.0f);
+        log_printf("[BAL] reference := 0 (pose %.2f after re-zero)", (double)a->theta_deg);
     }
 
     app_bal_update();                  /* recompute with this frame */

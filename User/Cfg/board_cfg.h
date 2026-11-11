@@ -794,7 +794,7 @@ extern "C" {
  * a 1.6 s limit cycle. sim/s6_walk_stab.py says the law should converge, so the
  * bench behaviour is tracked as an open question (docs/18#T29); keep it manual
  * until that is answered. "bal walk <k>" still turns it on at run time. */
-#define BAL_TRIM_W_K            1.0e-4f /* deg per rpm per second; the walk is
+#define BAL_TRIM_W_K            5.0e-5f /* deg per rpm per second; the walk is
                                          * called at 2 Hz with dt = 0.5 s, so
                                          * one update moves trim by 1e-4 x rpm.
                                          * 0 = walk off. See docs/00#082. */
@@ -818,7 +818,7 @@ extern "C" {
  * wheel is slow, the law saturates, or the body is being held. */
 #define BAL_WALK_DIV            100u    /* attitude frames per walk update  */
 #define BAL_WALK_DT_S           0.5f    /* 100 x 5 ms, matches BAL_WALK_DIV */
-#define BAL_WALK_STEP_DEG       0.15f   /* per update hard cap; 0.15 deg at
+#define BAL_WALK_STEP_DEG       0.05f   /* per update hard cap; 0.15 deg at
                                            2 Hz is 0.3 deg/s, which pulls a
                                            2.6 deg unplug error back in ~9 s */
 
@@ -905,7 +905,7 @@ extern "C" {
  * an operator/harness problem. Trip on it in 150 ms and name it "held". */
 #define BAL_HELD_MNM            12.0f   /* law above this counts as "asking"  */
 #define BAL_HELD_DEG            1.0f    /* and only when clearly off balance */
-#define BAL_HELD_DPS            3.0f    /* body below this counts as "static";
+#define BAL_HELD_DPS            5.0f    /* body below this counts as "static";
                                            5.0 let a free 4 deg swing look static */
 
 /* Button start (2026-11-06).
@@ -922,9 +922,9 @@ extern "C" {
 #define BAL_KEY_HOLD_MS         3000u   /* still: hold this long = engage now */
 #define BAL_KEY_START_DELAY_MS  300u    /* press+release -> engage after this */
 #define BAL_ENGAGE_RAMP_MS      800u    /* soft start after engage            */
-#define BAL_HELD_MS             300u    /* 60 frames: a swing dwells < 150 ms */
+#define BAL_HELD_MS             150u    /* 60 frames: a swing dwells < 150 ms */
 #define BAL_HELD_GRACE_MS       800u    /* no held trip this soon after engage */
-#define BAL_HELD_PHI_DEG        0.15f   /* body must stay this still to count  */
+#define BAL_HELD_PHI_DEG        0.30f   /* body must stay this still to count  */
 
 /* Engage-on-release. "bal run on" only arms: no torque flows until the body
  * actually starts to move, i.e. until the operator has let go. This removes the

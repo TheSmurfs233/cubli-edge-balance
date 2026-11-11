@@ -3933,11 +3933,11 @@ static void test_balkey(void)
     r = app_balance_info();
     T(r->engaged == 1u);
     T(r->state == BAL_ST_ARMED);
-    /* The engage path must NOT re-zero the attitude: the held pose is only a
-     * starting point, and turning it into "upright" is what walked the zero to
-     * 42.81 deg on 2026-11-11 (the cube then read +3.5 deg on its edge). */
-    T(fabsf(att_get()->theta_deg - 0.3f) < 0.01f);
-    T(att_offset_deg() == off_before);
+    /* The engage path re-zeroes the attitude frame on the held pose, exactly as
+     * the 2026-11-07 builds did: that is what makes the first command ~zero.
+     * Reading absolute angles afterwards is "att zero" work, not engage work. */
+    T(fabsf(att_get()->theta_deg) < 0.01f);
+    T(fabsf(att_offset_deg() - off_before) > 0.2f);
     section_end();
 
     section("balkey: a stale attitude frame is refused");
