@@ -7,6 +7,9 @@
 *.sh   text eol=lf
 *.py   text eol=lf
 *.ioc  text eol=lf
+# 无扩展名的 git 钩子（test/hooks/pre-commit 等）同样必须是 LF：
+# CRLF 的 shebang 会让钩子在 Windows 上直接失效
+test/hooks/* text eol=lf
 
 # 固件源码与 Keil 工程：保持检出为 CRLF（ARMCC V5 与 Keil 均无问题，且与基线一致）
 *.c    text eol=crlf
