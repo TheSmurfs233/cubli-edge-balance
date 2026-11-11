@@ -669,7 +669,14 @@ extern "C" {
  * Consequence: with the wheel at rest the balance law needs no trim at all, and
  * a reboot no longer re-introduces a 0.9 deg bias that winds the wheel up.
  * Nothing here is written to flash on purpose. */
-#define ATT_OFFSET_DEG          46.27f
+/* Measured on 2026-11-11 by solving omega_ss = 573 x (trim - phi_eq) with the
+ * balance loop actually running: trim -4.86 deg at 628 rpm gives phi_eq =
+ * -5.96 deg, so the edge balance point sits at 46.27 - 5.96 = 40.31 deg.
+ * The old 46.27 came from an early hand-held "att zero" and was ~6 deg off,
+ * which made every run start with a reference error that the wheel had to
+ * pay for (wheel ramped to the 1700 rpm trip in ~8 s). Re-measure this number
+ * whenever the wheel, the battery or the IMU mount changes. */
+#define ATT_OFFSET_DEG          40.30f
 
 /* First order low pass, 0 = off. Off while measuring: a filter hides exactly
  * the noise and the lag that S2 is supposed to quantify. */
