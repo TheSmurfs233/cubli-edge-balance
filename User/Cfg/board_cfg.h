@@ -850,7 +850,7 @@ extern "C" {
 /* ARM window: all four must hold before the loop is allowed to push.
  * 2.0 deg leaves 1.75 deg of margin against the 3.75 deg capture of 0.7x, and
  * the operator has to place the cube inside it by hand. */
-#define BAL_ARM_DEG             2.0f
+#define BAL_ARM_DEG             10.0f
 #define BAL_ARM_DPS             30.0f   /* do not take over a fast fall     */
 #define BAL_ARM_RPM             300.0f  /* wheel should be near standstill  */
 

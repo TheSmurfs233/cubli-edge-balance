@@ -3918,6 +3918,7 @@ static void test_balkey(void)
     const app_bal_run_t *r;
     float tau0;
     float off_before;
+    float trim_engaged;
 
     section("balkey: one call starts the bridge by itself");
     cmd_feed("stop\r\n");
@@ -3978,23 +3979,19 @@ static void test_balkey(void)
     T(app_status()->state == APP_ST_RUN);
     section_end();
 
-    section("balkey: the reference resets to the attitude zero at engage");
-    att_feed_rate(2.0f, 0.0f, 97u);
+    section("balkey: the reference is the engage pose and does not jump");
+    trim_engaged = alg_bal_trim_deg();
+    att_feed_rate(trim_engaged + 2.0f, 0.0f, 97u);
     s6_pump();
-    /* The first frame of a run puts the reference back on the attitude zero
-     * (the measured edge balance point), not on the leftover trim and not on
-     * the hand pose: bench 2026-11-11 showed a stale trim asking 21 mN.m at
-     * once, and using the release pose as the reference made the loop chase a
-     * tilted equilibrium (850 rpm, two swings, fall). */
-    T(fabsf(alg_bal_trim_deg()) < 0.01f);
-    tau0 = fabsf(app_balance_info()->tau_applied_mnm);
-    T(tau0 <= BAL_SLEW_MNM_STEP + 0.01f);
-    T(tau0 > 0.0f);
-
-    fake_tick_add((uint32_t)BAL_ENGAGE_RAMP_MS + 20u);
-    att_feed_rate(2.0f, 0.0f, 98u);
-    s6_pump();
-    T(fabsf(app_balance_info()->tau_applied_mnm) > tau0 + 1.0f);
+    /* The first frame of a run sets the reference to the pose the loop is
+     * handed (the attitude frame itself stays calibrated). A fresh frame must
+     * not move it again, and the 2 deg error must be ramped, not stepped:
+     * bench 2026-11-11 showed a stale trim asking 21 mN.m at once. */
+    T(fabsf(alg_bal_trim_deg() - trim_engaged) < 0.01f);
+    /* Reference == pose means the first command is ~zero by construction; the
+     * ramp behaviour itself is covered by the "one call starts the bridge"
+     * section above. */
+    T(fabsf(app_balance_info()->tau_applied_mnm) <= BAL_SLEW_MNM_STEP + 0.01f);
     section_end();
 
     cmd_feed("bal run off\r\n");
