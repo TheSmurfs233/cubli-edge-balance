@@ -3972,15 +3972,23 @@ static void test_balkey(void)
     T(app_status()->state == APP_ST_RUN);
     section_end();
 
-    section("balkey: first command is ramped, not full scale");
+    section("balkey: the first command starts from the engage pose, then ramps");
     att_feed_rate(2.0f, 0.0f, 97u);
+    s6_pump();
+    /* The first frame of a run takes the reference from the pose the operator
+     * picked, so it must ask for (almost) nothing -- see the 22:34 bench run
+     * where a stale trim made kp ask 20+ mN.m at once and the held guard fired
+     * 1.3 s later. */
+    T(fabsf(app_balance_info()->tau_applied_mnm) < (BAL_SLEW_MNM_STEP + 0.01f));
+
+    att_feed_rate(3.0f, 0.0f, 98u);        /* 1 deg of real error appears */
     s6_pump();
     tau0 = fabsf(app_balance_info()->tau_applied_mnm);
     T(tau0 <= BAL_SLEW_MNM_STEP + 0.01f);
     T(tau0 > 0.0f);
 
     fake_tick_add((uint32_t)BAL_ENGAGE_RAMP_MS + 20u);
-    att_feed_rate(2.0f, 0.0f, 98u);
+    att_feed_rate(3.0f, 0.0f, 99u);
     s6_pump();
     T(fabsf(app_balance_info()->tau_applied_mnm) > tau0 + 1.0f);
     section_end();

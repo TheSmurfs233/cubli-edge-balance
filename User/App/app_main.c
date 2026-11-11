@@ -1013,6 +1013,20 @@ void app_balance_update(void)
         s_last_frames = frames;
     }
 
+    /* Take the reference on the first frame of a run (2026-11-11).
+     * The button path engages the loop while the hand is still on the cube and
+     * the trim left over from the previous run can be degrees away, so kp asks
+     * for 20+ mN.m from the very first frame. The hand does not let the body
+     * move, the held guard sees "big command + still body" and trips 1.3 s in
+     * (bench 22:34:40: trip held, window 1324 ms, tau +28 mN.m, phi 5.65 deg).
+     * Starting from the pose the operator picked makes the initial torque zero;
+     * the wheel walk then pulls the reference to the real balance point. */
+    if ((s_run.frames == 0u) && (fabsf(a->theta_deg) < BAL_TRIM_GATE_DEG))
+    {
+        app_bal_trim_learn(a->theta_deg);
+        log_printf("[BAL] zero at engage %.2f deg", (double)a->theta_deg);
+    }
+
     app_bal_update();                  /* recompute with this frame */
     tau = bal_p()->tau_mnm;
 
