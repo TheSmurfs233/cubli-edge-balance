@@ -676,7 +676,7 @@ extern "C" {
  * which made every run start with a reference error that the wheel had to
  * pay for (wheel ramped to the 1700 rpm trip in ~8 s). Re-measure this number
  * whenever the wheel, the battery or the IMU mount changes. */
-#define ATT_OFFSET_DEG          40.30f
+#define ATT_OFFSET_DEG          44.25f
 
 /* First order low pass, 0 = off. Off while measuring: a filter hides exactly
  * the noise and the lag that S2 is supposed to quantify. */
