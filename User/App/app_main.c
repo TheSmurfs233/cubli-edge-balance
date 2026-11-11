@@ -925,11 +925,19 @@ uint8_t app_balance_start_now(void)
         }
     }
 
-    /* The operator is holding the cube where it is supposed to balance, so make
-     * that pose the zero. A guessed ATT_OFFSET_DEG sat 0.9 deg away from the
-     * real equilibrium once, which is ~5 mN.m of constant torque and a wheel
-     * that winds up to the trip line (sim/s6_disturb.py: 2 deg -> 1239 rpm). */
-    att_zero();
+    /* Do NOT re-zero the attitude here. Taking the pose in the operator's hands
+     * as "upright" moves the whole reference with whatever error the hand has:
+     * 2026-11-11 it drifted to 42.81 deg, so a cube sitting on its edge read
+     * phi = +3.5 deg, the loop pushed the wrong way at full torque and the
+     * swing grew until it fell. ATT_OFFSET_DEG is the measured edge balance
+     * point; the trim walk absorbs the residual. Use "att zero" explicitly if
+     * a different edge is ever used. */
+    if (s_run.frames == 0u)
+    {
+        log_printf("[BAL] engage: att zero %.2f deg (compiled %.2f), trim %.2f",
+                   (double)att_offset_deg(), (double)ATT_OFFSET_DEG,
+                   (double)alg_bal_trim_deg());
+    }
 
     rc = app_balance_arm(1u);
     if (rc != 0u)

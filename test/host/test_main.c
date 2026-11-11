@@ -3917,12 +3917,14 @@ static void test_balkey(void)
 {
     const app_bal_run_t *r;
     float tau0;
+    float off_before;
 
     section("balkey: one call starts the bridge by itself");
     cmd_feed("stop\r\n");
     pump_all();
     T(app_balance_info()->state == BAL_ST_DISARMED);
     att_feed_rate(0.3f, 0.0f, 95u);
+    off_before = att_offset_deg();
     tx_clear();
     T(app_balance_start_now() == 0u);          /* mode FOC + start inside */
     T(app_status()->state == APP_ST_RUN);
@@ -3930,7 +3932,11 @@ static void test_balkey(void)
     r = app_balance_info();
     T(r->engaged == 1u);
     T(r->state == BAL_ST_ARMED);
-    T(fabsf(att_get()->theta_deg) < 0.01f);    /* the held pose became zero */
+    /* The engage path must NOT re-zero the attitude: the held pose is only a
+     * starting point, and turning it into "upright" is what walked the zero to
+     * 42.81 deg on 2026-11-11 (the cube then read +3.5 deg on its edge). */
+    T(fabsf(att_get()->theta_deg - 0.3f) < 0.01f);
+    T(att_offset_deg() == off_before);
     section_end();
 
     section("balkey: a stale attitude frame is refused");
