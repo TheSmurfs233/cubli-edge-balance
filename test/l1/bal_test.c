@@ -371,6 +371,34 @@ int main(void)
   d2 = alg_bal_trim_deg() - t0;
   chk((d2 < -0.01f), "22b a sustained 400 rpm does walk the trim down");
 
+  /* 23: the per-call step cap is what limits a big unplug error.  With a gain
+   * that would ask for more, one call must move the trim by exactly the cap:
+   * 0.15 deg is 0.3 deg/s at 2 Hz and pulls a 2.6 deg error back in ~9 s. */
+  cfg = cfg_make(1.0f, MAX_NM);
+  cfg.trim_w_k = 1.0e-3f;               /* asks for 0.4 deg per call here */
+  cfg.walk_step_deg = 0.15f;
+  cfg.walk_filt_tau_s = 0.0f;           /* follow the wheel instantly */
+  cfg.walk_phi_gate_deg = 10.0f;
+  cfg.trim_gate_deg = 10.0f;
+  cfg.trim_clamp_deg = 5.0f;
+
+  alg_bal_init(&cfg);
+  alg_bal_step(0.0f, 0.0f, 41.9f, &out);       /* 400 rpm */
+  t0 = alg_bal_trim_deg();
+  alg_bal_adapt(0.5f);
+  d1 = alg_bal_trim_deg() - t0;
+  chk((absf(d1 + 0.15f) < 1.0e-4f),
+      "23a one call moves the trim by exactly the 0.15 deg cap");
+
+  cfg.walk_step_deg = 0.05f;
+  alg_bal_init(&cfg);
+  alg_bal_step(0.0f, 0.0f, 41.9f, &out);
+  t0 = alg_bal_trim_deg();
+  alg_bal_adapt(0.5f);
+  d2 = alg_bal_trim_deg() - t0;
+  chk((absf(d2 + 0.05f) < 1.0e-4f),
+      "23b a smaller cap still bounds the same call");
+
   printf("checks: %d  failed: %d\n", s_checks, s_failed);
   printf("RESULT: %s\n", (s_failed == 0) ? "PASS" : "FAIL");
 

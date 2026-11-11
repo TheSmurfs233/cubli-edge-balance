@@ -787,7 +787,7 @@ extern "C" {
  * a 1.6 s limit cycle. sim/s6_walk_stab.py says the law should converge, so the
  * bench behaviour is tracked as an open question (docs/18#T29); keep it manual
  * until that is answered. "bal walk <k>" still turns it on at run time. */
-#define BAL_TRIM_W_K            5.0e-5f /* deg per rpm per second; the walk is
+#define BAL_TRIM_W_K            1.0e-4f /* deg per rpm per second; the walk is
                                          * called at 2 Hz with dt = 0.5 s, so
                                          * one update moves trim by 1e-4 x rpm.
                                          * 0 = walk off. See docs/00#082. */
@@ -811,7 +811,9 @@ extern "C" {
  * wheel is slow, the law saturates, or the body is being held. */
 #define BAL_WALK_DIV            100u    /* attitude frames per walk update  */
 #define BAL_WALK_DT_S           0.5f    /* 100 x 5 ms, matches BAL_WALK_DIV */
-#define BAL_WALK_STEP_DEG       0.05f   /* per update hard cap              */
+#define BAL_WALK_STEP_DEG       0.15f   /* per update hard cap; 0.15 deg at
+                                           2 Hz is 0.3 deg/s, which pulls a
+                                           2.6 deg unplug error back in ~9 s */
 
 /** Low pass on the wheel speed that feeds the walk, seconds (0 = off).
  *  The walk used to integrate the raw speed; on the bench that closed a
