@@ -898,7 +898,8 @@ extern "C" {
  * an operator/harness problem. Trip on it in 150 ms and name it "held". */
 #define BAL_HELD_MNM            12.0f   /* law above this counts as "asking"  */
 #define BAL_HELD_DEG            1.0f    /* and only when clearly off balance */
-#define BAL_HELD_DPS            5.0f    /* body below this counts as "static" */
+#define BAL_HELD_DPS            3.0f    /* body below this counts as "static";
+                                           5.0 let a free 4 deg swing look static */
 
 /* Button start (2026-11-06).
  * Single press + release: the pose being held becomes zero, the drive is
@@ -914,9 +915,9 @@ extern "C" {
 #define BAL_KEY_HOLD_MS         3000u   /* still: hold this long = engage now */
 #define BAL_KEY_START_DELAY_MS  300u    /* press+release -> engage after this */
 #define BAL_ENGAGE_RAMP_MS      800u    /* soft start after engage            */
-#define BAL_HELD_MS             150u    /* 30 frames at 200 Hz               */
+#define BAL_HELD_MS             300u    /* 60 frames: a swing dwells < 150 ms */
 #define BAL_HELD_GRACE_MS       800u    /* no held trip this soon after engage */
-#define BAL_HELD_PHI_DEG        0.30f   /* body must stay this still to count  */
+#define BAL_HELD_PHI_DEG        0.15f   /* body must stay this still to count  */
 
 /* Engage-on-release. "bal run on" only arms: no torque flows until the body
  * actually starts to move, i.e. until the operator has let go. This removes the

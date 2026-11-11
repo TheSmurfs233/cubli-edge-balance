@@ -1021,10 +1021,18 @@ void app_balance_update(void)
      * (bench 22:34:40: trip held, window 1324 ms, tau +28 mN.m, phi 5.65 deg).
      * Starting from the pose the operator picked makes the initial torque zero;
      * the wheel walk then pulls the reference to the real balance point. */
-    if ((s_run.frames == 0u) && (fabsf(a->theta_deg) < BAL_TRIM_GATE_DEG))
+    if (s_run.frames == 0u)
     {
-        app_bal_trim_learn(a->theta_deg);
-        log_printf("[BAL] zero at engage %.2f deg", (double)a->theta_deg);
+        /* Reference := the attitude zero, NOT the pose the hand let go at.
+         * ATT_OFFSET_DEG is the measured edge balance point, so trim 0 is the
+         * physically right reference; the operator's release pose can be a
+         * couple of degrees off and using it as the reference made the loop
+         * chase a tilted equilibrium (wheel 850 rpm, two swings, fall). The
+         * residual is then removed by the wheel walk, which is a slow but
+         * honest correction. */
+        (void)app_bal_trim_learn(BAL_TRIM_DEG);
+        log_printf("[BAL] reference reset to %.2f deg (pose %.2f)",
+                   (double)BAL_TRIM_DEG, (double)a->theta_deg);
     }
 
     app_bal_update();                  /* recompute with this frame */

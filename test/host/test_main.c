@@ -3890,14 +3890,14 @@ static void test_s6(void)
         T(app_balance_info()->state == BAL_ST_RUN);
         /* Past the grace window a big torque with a static body is a hand. */
         fake_tick_add((uint32_t)BAL_HELD_GRACE_MS + 50u);
-        for (i = 0u; i < 40u; i++)
+        for (i = 0u; i < 90u; i++)
         {
             att_feed_rate(6.0f, 0.0f, seq);
             seq++;
             s6_pump();
             if (app_balance_info()->state == BAL_ST_TRIP) { break; }
         }
-        T(i < 40u);                          /* it did trip inside 200 ms */
+        T(i < 90u);                          /* it did trip inside 450 ms */
     }
     r = app_balance_info();
     T(r->state == BAL_ST_TRIP);
@@ -3972,23 +3972,21 @@ static void test_balkey(void)
     T(app_status()->state == APP_ST_RUN);
     section_end();
 
-    section("balkey: the first command starts from the engage pose, then ramps");
+    section("balkey: the reference resets to the attitude zero at engage");
     att_feed_rate(2.0f, 0.0f, 97u);
     s6_pump();
-    /* The first frame of a run takes the reference from the pose the operator
-     * picked, so it must ask for (almost) nothing -- see the 22:34 bench run
-     * where a stale trim made kp ask 20+ mN.m at once and the held guard fired
-     * 1.3 s later. */
-    T(fabsf(app_balance_info()->tau_applied_mnm) < (BAL_SLEW_MNM_STEP + 0.01f));
-
-    att_feed_rate(3.0f, 0.0f, 98u);        /* 1 deg of real error appears */
-    s6_pump();
+    /* The first frame of a run puts the reference back on the attitude zero
+     * (the measured edge balance point), not on the leftover trim and not on
+     * the hand pose: bench 2026-11-11 showed a stale trim asking 21 mN.m at
+     * once, and using the release pose as the reference made the loop chase a
+     * tilted equilibrium (850 rpm, two swings, fall). */
+    T(fabsf(alg_bal_trim_deg()) < 0.01f);
     tau0 = fabsf(app_balance_info()->tau_applied_mnm);
     T(tau0 <= BAL_SLEW_MNM_STEP + 0.01f);
     T(tau0 > 0.0f);
 
     fake_tick_add((uint32_t)BAL_ENGAGE_RAMP_MS + 20u);
-    att_feed_rate(3.0f, 0.0f, 99u);
+    att_feed_rate(2.0f, 0.0f, 98u);
     s6_pump();
     T(fabsf(app_balance_info()->tau_applied_mnm) > tau0 + 1.0f);
     section_end();
