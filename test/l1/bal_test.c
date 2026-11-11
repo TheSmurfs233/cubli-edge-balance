@@ -66,6 +66,10 @@ static alg_bal_cfg_t cfg_make(float sign, float max_nm)
   c.walk_step_deg = 0.0f;      /* 0 = fall back to 0.01 deg per call */
   c.walk_deadband_rpm = 0.0f;  /* 0 = no deadband */
   c.walk_phi_gate_deg = 0.0f;  /* 0 = fall back to trim_gate_deg */
+  c.walk_fast_rpm = 0.0f;      /* 0 = no gain schedule */
+  c.walk_fast_x = 0.0f;
+  c.ff_viscous_nm_s = 0.0f;    /* 0 = no extra damping */
+  c.walk_phi_gate_deg = 0.0f;  /* 0 = fall back to trim_gate_deg */
 
   return c;
 }
@@ -202,9 +206,18 @@ int main(void)
   chk((near_mnm(out.tau_ff_nm, -2.05f, TOL_MNM) != 0) &&
       (near_mnm(out.tau_nm, -(KW * 100.0f * RPM2RPS * 1000.0f) - 2.05f, 0.02f) != 0),
       "16b ff is -tau_f when the wheel spins backward");
-  alg_bal_step(0.0f, 0.0f, 0.01f * RPM2RPS, &out);   /* inside the band */
-  chk(near_mnm(out.tau_ff_nm, -2.05f, TOL_MNM) != 0,
-      "16c ff keeps its last sign inside the deadband (no chatter)");
+  alg_bal_step(0.0f, 0.0f, 0.01f, &out);             /* 10 % of a 0.1 rad/s band */
+  chk(near_mnm(out.tau_ff_nm, 0.205f, TOL_MNM) != 0,
+      "16c ff ramps linearly inside the band (no relay, no chatter)");
+  alg_bal_step(0.0f, 0.0f, -0.05f, &out);            /* half the band, backward */
+  chk(near_mnm(out.tau_ff_nm, -1.025f, TOL_MNM) != 0,
+      "16e ff is half of tau_f at half the band");
+  alg_bal_step(0.0f, 0.0f, 0.10f, &out);             /* exactly the band edge */
+  chk(near_mnm(out.tau_ff_nm, 2.05f, TOL_MNM) != 0,
+      "16f ff reaches tau_f at the band edge, continuous");
+  alg_bal_step(0.0f, 0.0f, 0.099f, &out);            /* just inside the edge */
+  chk(near_mnm(out.tau_ff_nm, 2.0295f, TOL_MNM) != 0,
+      "16g ff just inside the band matches the saturated side");
   cfg = cfg_make(-1.0f, MAX_NM);        /* flipped mounting sign */
   cfg.ff_nm = 0.00205f;
   cfg.ff_deadband_rps = 0.1f;

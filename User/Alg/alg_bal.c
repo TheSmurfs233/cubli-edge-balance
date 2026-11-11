@@ -21,7 +21,6 @@
 static alg_bal_cfg_t s_cfg;
 static alg_bal_out_t s_out;
 static uint8_t       s_ready;
-static float         s_ff_sgn;   /* last feed-forward direction, +-1 or 0 */
 static float         s_trim_rad; /* zero trim in use, rad                 */
 static float         s_phi_deg;  /* last true body angle, deg             */
 
@@ -119,7 +118,6 @@ void alg_bal_reset(void)
   s_out.saturated  = 0u;
   s_out.deadband   = 0u;
   s_out.steps      = 0u;
-  s_ff_sgn         = 0.0f;
   s_trim_rad       = s_cfg.trim_deg * 0.01745329252f;
   s_out.trim_deg   = s_cfg.trim_deg;
   s_phi_deg        = 0.0f;
@@ -187,7 +185,21 @@ void alg_bal_adapt(float dt_s)
     return;
   }
 
-  s_trim_rad -= (s_cfg.trim_w_k * rpm * 0.01745329252f) * dt_s;
+  /* Gain schedule: the slow gain is what keeps the 2 s friction limit cycle
+     quiet, but it would also take a whole minute to walk off a 400 rpm spin-up.
+     Above walk_fast_rpm the error is unambiguous, so switch to the fast gain and
+     let the per-update step cap bound the rate. */
+  {
+    float k = s_cfg.trim_w_k;
+    if ((s_cfg.walk_fast_rpm > 0.0f) && (s_cfg.walk_fast_x > 1.0f))
+    {
+      if ((rpm > s_cfg.walk_fast_rpm) || (rpm < -s_cfg.walk_fast_rpm))
+      {
+        k *= s_cfg.walk_fast_x;
+      }
+    }
+    s_trim_rad -= (k * rpm * 0.01745329252f) * dt_s;
+  }
 
   /* Hard rate cap: a bogus wheel reading must not be able to ram the reference
      into its clamp inside a second (0.01 deg per call at 200 Hz = 2 deg/s). */
@@ -298,15 +310,34 @@ void alg_bal_step(float phi_rad, float dphi_rps, float omega_rps,
   ff = 0.0f;
   if (s_cfg.ff_nm > 0.0f)
   {
-    if (omega_rps > s_cfg.ff_deadband_rps)
+    float u;
+    /* Continuous through zero on purpose. The old sign-with-deadband form is a
+       relay, and a relay balancing at omega = 0 makes a limit cycle: 2026-11-11
+       bench, wheel 44 % of the time inside +-30 rpm, sign flipping 1.7 times a
+       second, body swaying 0.76 deg peak to peak with a 2.28 s period. Ramping
+       the compensation over +-band instead keeps the torque continuous, which
+       removes the relay and leaves a small damping term near zero. */
+    if (s_cfg.ff_deadband_rps > 0.0f)
     {
-      s_ff_sgn = 1.0f;
+      u = omega_rps / s_cfg.ff_deadband_rps;
+      if (u > 1.0f)
+      {
+        u = 1.0f;
+      }
+      else if (u < -1.0f)
+      {
+        u = -1.0f;
+      }
     }
-    else if (omega_rps < -s_cfg.ff_deadband_rps)
+    else
     {
-      s_ff_sgn = -1.0f;
+      u = (omega_rps > 0.0f) ? 1.0f : ((omega_rps < 0.0f) ? -1.0f : 0.0f);
     }
-    ff = s_ff_sgn * s_cfg.ff_nm;
+    ff = s_cfg.ff_nm * u;
+    if (s_cfg.ff_viscous_nm_s > 0.0f)
+    {
+      ff += s_cfg.ff_viscous_nm_s * omega_rps;
+    }
     tau += ff;
   }
   s_out.tau_ff_nm = ff;

@@ -354,6 +354,7 @@ static void bal_cfg_load(void)
     s_bal_cfg.max_nm    = BAL_MAX_MNM / 1000.0f;
     s_bal_cfg.ff_nm     = BAL_FF_MNM / 1000.0f;
     s_bal_cfg.ff_deadband_rps = BAL_FF_DEADBAND_RPM * BAL_RPM2RPS;
+    s_bal_cfg.ff_viscous_nm_s  = BAL_FF_VISCOUS_NM_S;
     s_bal_cfg.trim_deg = BAL_TRIM_DEG;
     s_bal_cfg.trim_clamp_deg = BAL_TRIM_MAX_DEG;
     s_bal_cfg.trim_gate_deg = BAL_TRIM_GATE_DEG;
@@ -361,6 +362,8 @@ static void bal_cfg_load(void)
     s_bal_cfg.walk_step_deg = BAL_WALK_STEP_DEG;
     s_bal_cfg.walk_deadband_rpm = BAL_WALK_DEADBAND_RPM;
     s_bal_cfg.walk_phi_gate_deg = BAL_WALK_PHI_GATE_DEG;
+    s_bal_cfg.walk_fast_rpm     = BAL_WALK_FAST_RPM;
+    s_bal_cfg.walk_fast_x       = BAL_WALK_FAST_X;
     s_bal_cfg.walk_filt_tau_s   = BAL_WALK_FILT_TAU_S;
     s_bal_cfg.frame_dt_s        = BAL_FRAME_DT_S;
 

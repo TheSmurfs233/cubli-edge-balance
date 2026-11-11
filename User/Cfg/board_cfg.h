@@ -757,7 +757,8 @@ extern "C" {
  * Applied with the sign of the wheel, inside a hysteresis band so noise around
  * standstill cannot flip it every frame. 0 disables it. */
 #define BAL_FF_MNM              2.05f
-#define BAL_FF_DEADBAND_RPM     30.0f
+#define BAL_FF_DEADBAND_RPM     40.0f  /* linear ramp half-width, see alg_bal.c */
+#define BAL_FF_VISCOUS_NM_S     3.0e-6f /* extra damping, 0.3 mN.m at 1000 rpm   */
 
 /* Runtime zero trim, operator adjustable with "bal trim <deg>" (RAM only, so a
  * reboot restores the value below). Bounded because a large trim is just a
@@ -814,6 +815,8 @@ extern "C" {
  *  The walk used to integrate the raw speed; on the bench that closed a
  *  loop through the 12 s hunting mode and produced a limit cycle, while
  *  freezing the walk left the machine calm (docs/00 #084, #085). */
+#define BAL_WALK_FAST_RPM       150.0f  /* above this the walk uses fast gain     */
+#define BAL_WALK_FAST_X         5.0f    /* 5x => 0.1 deg/s at the step cap        */
 #define BAL_WALK_FILT_TAU_S     8.0f
 #define BAL_WALK_DEADBAND_RPM   40.0f   /* below this the walk stops        */
 #define BAL_WALK_PHI_GATE_DEG   2.0f    /* outside this the body is falling */

@@ -36,7 +36,8 @@ typedef struct
   float sign;        /**< +1.0f or -1.0f, physical wheel direction */
   float max_nm;      /**< symmetric torque limit, > 0             */
   float ff_nm;       /**< friction feed-forward magnitude, N.m; 0 = off */
-  float ff_deadband_rps; /**< |wheel speed| below which the ff sign is
+  float ff_deadband_rps;
+  float ff_viscous_nm_s;   /* extra viscous torque, N.m per rad/s */ /**< |wheel speed| below which the ff sign is
                               kept from the previous call, rad/s       */
   float trim_deg;        /**< initial zero trim, deg (positive = lean back) */
   float trim_clamp_deg;  /**< adaptation is clamped to +-this, deg     */
@@ -45,6 +46,8 @@ typedef struct
                               walked by the wheel speed; 0 = frozen     */
   float walk_step_deg;      /**< hard cap per alg_bal_adapt() call, deg   */
   float walk_deadband_rpm;  /**< no walk below this in either direction   */
+  float walk_fast_rpm;      /* walk gain schedule knee, rpm             */
+  float walk_fast_x;        /* gain multiplier above the knee           */
   float walk_filt_tau_s;    /**< low pass on omega, seconds (0 = off)   */
   float frame_dt_s;         /**< nominal step between calls, seconds    */
   float walk_phi_gate_deg;  /**< walk only while |phi| stays under this;
