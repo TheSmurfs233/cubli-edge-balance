@@ -63,3 +63,7 @@ MDK-ARM/.tmp_env_*.txt
 
 MDK-ARM/.tmp*
 .tmp_env/*.txt
+
+# release artifacts (firmware snapshots) are intentional binaries
+!release/*
+!release/**
