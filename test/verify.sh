@@ -8,6 +8,7 @@
 #    3. test/host/build.sh      firmware logic on a fake HAL (L2)
 #    4. test/doc_check.py       documentation consistency (static)
 #    5. test/check_build_id.py  FW_BUILD_ID has a row in docs/01 (static)
+#    6. test/check_hooks.py     the code+docs pre-commit hook is installed (static)
 #
 #  The Keil firmware build (0 error / 0 warning) is a Windows-only gate and is
 #  NOT part of this script; run it separately:
@@ -52,6 +53,7 @@ run_step "L1 offline algorithms"     bash   "$HERE/l1/run.sh"
 run_step "L2 firmware on fake HAL"   bash   "$HERE/host/build.sh"
 run_step "documentation consistency" python3 "$HERE/doc_check.py"
 run_step "firmware build id"         python3 "$HERE/check_build_id.py"
+run_step "code+docs commit hook"     python3 "$HERE/check_hooks.py"
 
 printf '\n============================\n'
 for i in $(seq 1 "$step"); do

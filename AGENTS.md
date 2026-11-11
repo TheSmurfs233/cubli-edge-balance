@@ -75,6 +75,15 @@ Keil ARMCC V5 按 GBK 解析源文件，注释里出现中文极易触发 `#8: m
 > 门禁 `test/check_build_id.py` 会查这张表，漏记直接 FAIL。Bump 它还会强制全量重编，
 > 顺带刷新时间戳。
 
+**文档必须跟代码在同一个提交里**，不允许"先提交代码、下一个提交补文档"。
+这条规则由 pre-commit 钩子强制执行（`test/hooks/pre-commit`，源码在 `test/hooks/`，
+用 `bash test/install_hooks.sh` 装进 `.git/hooks/`，门禁 6 会检查它是否在位且不陈旧）：
+
+- 暂存区里有 `User/` 或 `Core/` 的改动、却没有任何 `docs/` 的改动 ⇒ **提交被拒绝**；
+- 真要绕过只能 `git commit --no-verify`，且必须在正文里写清为什么这一版没有可同步的文档；
+- 这是有代价换来的：2026-11-11 的 `7aad7ce`、`d221ab9` 两个提交改了 `BAL_*` 常数却没带文档，
+  有一段时间仓库描述的固件与板上跑的不是一回事。
+
 ---
 
 ## 5. 构建与测试
@@ -82,10 +91,12 @@ Keil ARMCC V5 按 GBK 解析源文件，注释里出现中文极易触发 `#8: m
 | 项 | 命令 | 期望 |
 |---|---|---|
 | 固件构建 | `Start-Process UV4.exe -ArgumentList '-r','cubli.uvprojx','-j0','-o',<日志文件名> -WorkingDirectory MDK-ARM` | 0 error 0 warning |
-| 一键门禁 | `bash test/verify.sh` | `RESULT: PASS (all 5 gates)` |
+| 一键门禁 | `bash test/verify.sh` | `RESULT: PASS (all 6 gates)` |
 | 主机测试 | `bash test/host/build.sh` | `failed: 0` |
 | 文档检查 | `python test/doc_check.py` | PASS |
 | 构建号检查 | `python test/check_build_id.py` | PASS（`FW_BUILD_ID` 已在 `docs/01` §2.6 登记） |
+| 钩子检查 | `python test/check_hooks.py` | PASS（`.git/hooks/pre-commit` 已装且与 `test/hooks/` 一致） |
+| 装钩子（新克隆必做一次） | `bash test/install_hooks.sh` | `installed: .git/hooks/pre-commit` |
 | L1 仿真 | `D:\Embedded\STM32\cubli\.tmp_env\venv\Scripts\python.exe sim/xxx.py` | 断言通过 |
 
 > Keil 返回码：**0 = 成功，1 = 有警告，2 = 有错误**。每次构建**换一个日志文件名**，

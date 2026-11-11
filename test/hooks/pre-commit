@@ -1,0 +1,46 @@
+#!/bin/sh
+# Pre-commit gate: a firmware change must arrive together with its documents.
+#
+# Why: "改代码必须同步文档" (AGENTS.md section 4) was only a rule for humans/AI to
+# remember. On 2026-11-11 two commits (7aad7ce, d221ab9) changed BAL_* constants
+# and left the docs to a later commit, so for a while the repo described a
+# firmware that did not exist. This hook makes the rule mechanical.
+#
+# changelog: 2026-11-12 first version.
+# NOTE: core.quotepath=false is mandatory. With the default (true) git wraps
+# non-ASCII paths in quotes and escapes them ("docs/90_\345..."), so a plain
+# '^docs/' match silently fails and every code commit is rejected.
+#
+# Rule: if anything under User/ or Core/ is staged, at least one file under
+# docs/ must be staged in the same commit.
+
+STAGED=$(git -c core.quotepath=false diff --cached --name-only)
+
+fail() {
+    echo ""
+    echo "  pre-commit: firmware changed, but no document changed."
+    echo ""
+    echo "  Staged code:"
+    echo "$CODE" | sed 's/^/    /'
+    echo ""
+    echo "  AGENTS.md section 4 requires, in the SAME commit:"
+    echo "    - docs/10 for module/layer changes"
+    echo "    - docs/19 for pins/peripherals/sampling changes"
+    echo "    - docs/90 for new macros/thresholds or new limitations"
+    echo "    - docs/00 (log entry) + docs/01 (progress) for any step forward"
+    echo "    - docs/01 section 2.6 + FW_BUILD_ID for ANY firmware change"
+    echo ""
+    echo "  If this commit really has nothing to document, use:"
+    echo "    git commit --no-verify   (and say why in the body)"
+    echo ""
+    exit 1
+}
+
+CODE=$(echo "$STAGED" | grep -E '^(User|Core)/')
+DOCS=$(echo "$STAGED" | grep -E '^docs/')
+
+if [ -n "$CODE" ] && [ -z "$DOCS" ]; then
+    fail
+fi
+
+exit 0
