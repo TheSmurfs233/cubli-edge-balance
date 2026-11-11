@@ -764,7 +764,7 @@ extern "C" {
  * reboot restores the value below). Bounded because a large trim is just a
  * worse zero: the usable range around the balance point is a couple of degrees. */
 #define BAL_TRIM_DEG            0.0f
-#define BAL_TRIM_MAX_DEG        5.0f    /* must cover the zero error INCLUDING the
+#define BAL_TRIM_MAX_DEG        12.0f   /* must cover the zero error INCLUDING the
                                          * USB lead: plugged the bench sat at -2.6 deg
                                          * and unplugged near 0, a 3 deg swing that
                                          * pinned the old +-3 deg clamp (docs/00#087) */
