@@ -789,20 +789,19 @@ extern "C" {
  * -> 0 rpm in 17 s with the body moving less than 0.05 deg, k = 1e-3 -> 5 s but
  * 3.11 deg of lean. 3e-4 chosen. 0 freezes the trim and leaves "bal trim" in
  * charge. */
-/* 2026-11-11: back to 0 on the bench. With 3e-4 the reference walked into
- * its -3.00 deg clamp while the wheel stayed at +405 rpm, and the cube sat in
- * a 1.6 s limit cycle. sim/s6_walk_stab.py says the law should converge, so the
- * bench behaviour is tracked as an open question (docs/18#T29); keep it manual
- * until that is answered. "bal walk <k>" still turns it on at run time. */
-#define BAL_TRIM_W_K            5.0e-5f /* deg per rpm per second; the walk is
+#define BAL_TRIM_W_K            1.0e-4f /* deg per rpm per second; the walk is
                                          * called at 2 Hz with dt = 0.5 s, so
                                          * one update moves trim by 1e-4 x rpm.
                                          * 0 = walk off. See docs/00#082. */
-/* Tried 3e-4 again on 2026-11-10 once the encoder was clean: on the bench the
- * reference walked into its -3.00 deg clamp while the wheel stayed at +405 rpm
- * and the cube sat in a 1.6 s limit cycle (docs/00#079). sim/s6_walk_stab.py
- * still says the law should settle, so the difference is an open question
- * (docs/18#T29) - keep the default at 0 and use "bal walk <k>" for experiments. */
+
+/* 2026-11-11 23:36, bench A/B with 24-channel wave (docs/00 #097):
+ *   walk 5e-5 + 8 s filter -> phi pp 2.638 deg, wheel -171..+284 rpm reversing
+ *   every 2 s (4 s period), i.e. the walk itself was the oscillation source;
+ *   "bal walk 0"          -> phi pp 0.314 deg, wheel +0..+73 rpm, calm.
+ * The 4 s mode got through an 8 s filter almost untouched (0.23), so the
+ * filter goes to 30 s (attenuation 0.02) and k doubles to 1e-4 to keep the
+ * same DC correction speed: at 600 rpm trim moves 0.06 deg/s, so the 2.66 deg
+ * unplug error that 18#T22 measured comes back in about 45 s. */
 #define BAL_TRIM_GATE_DEG       4.0f    /* outside this the body is still being
                                          * captured; do not lean it further */
 
@@ -822,14 +821,16 @@ extern "C" {
                                            2 Hz is 0.3 deg/s, which pulls a
                                            2.6 deg unplug error back in ~9 s */
 
-/** Low pass on the wheel speed that feeds the walk, seconds (0 = off).
- *  The walk used to integrate the raw speed; on the bench that closed a
- *  loop through the 12 s hunting mode and produced a limit cycle, while
- *  freezing the walk left the machine calm (docs/00 #084, #085). */
+/* Low pass on the wheel speed that feeds the walk, seconds (0 = off).
+ * The walk must integrate the AVERAGE wheel speed, not the swing: on the bench
+ * the closed loop hunted at 4 s (docs/00 #097). 30 s puts that mode at 0.02,
+ * so the walk only sees the DC part (= how far trim is from the balance
+ * point). Keep it well above the hunting period if the machine ever hunts
+ * again. */
 #define BAL_WALK_FAST_RPM       150.0f  /* above this the walk uses fast gain     */
 #define BAL_WALK_FAST_X         1.0f    /* OFF on purpose: 5x swung the trim +-1 deg
                                           and drove a 3 deg sway (docs/00#087)     */
-#define BAL_WALK_FILT_TAU_S     8.0f
+#define BAL_WALK_FILT_TAU_S     30.0f
 #define BAL_WALK_DEADBAND_RPM   40.0f   /* below this the walk stops        */
 #define BAL_WALK_PHI_GATE_DEG   2.0f    /* outside this the body is falling */
 
