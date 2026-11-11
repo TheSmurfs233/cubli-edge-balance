@@ -991,10 +991,13 @@ void app_balance_update(void)
     /* 5 ms zero-order hold: one command per attitude frame. Applying the same
      * frame 375 times would turn kd into a constant offset (an implicit
      * friction term) and is exactly what the L1 model does not contain.
-     * The counter is the IMU frame counter, not att_state.seq: mid_att bumps
-     * its own seq on every call, so the main loop would look like fresh data. */
+     * The counter must be the AHRS counter (0x41 only, 200 Hz), not the total
+     * frame counter: the module also sends 0x40 at 100 Hz, so stat.frames runs
+     * at ~300 Hz and every divider hung off it (the walk was 2.9 Hz instead of
+     * 2.0, measured 2026-11-12). mid_att bumps att_state.seq on every call, so
+     * that one is unusable for the same reason. */
     {
-        uint32_t frames = imu_ctx()->stat.frames;
+        uint32_t frames = imu_ctx()->stat.frames_ahrs;
         if (frames == s_last_frames)
         {
             return;

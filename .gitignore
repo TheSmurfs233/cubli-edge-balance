@@ -68,3 +68,4 @@ MDK-ARM/.tmp*
 !release/*
 !release/**
 *.csv
+walk_verify*.txt
