@@ -3606,11 +3606,11 @@ static void test_bal(void)
     tx_clear();
     cmd_feed("bal trim 9\r\n");
     pump_all();
-    T(tx_contains("OK bal trim 3.00 deg"));
+    T(tx_contains("OK bal trim 5.00 deg"));
     tx_clear();
     cmd_feed("bal trim\r\n");
     pump_all();
-    T(tx_contains("trim   = 3.00 deg"));
+    T(tx_contains("trim   = 5.00 deg"));
     T(fabsf(app_bal_trim_get() - BAL_TRIM_MAX_DEG) < 0.001f);
     tx_clear();
     cmd_feed("bal trim x\r\n");

@@ -764,8 +764,10 @@ extern "C" {
  * reboot restores the value below). Bounded because a large trim is just a
  * worse zero: the usable range around the balance point is a couple of degrees. */
 #define BAL_TRIM_DEG            0.0f
-#define BAL_TRIM_MAX_DEG        3.0f    /* must cover the zero error: the bench
-                                         * sat at -2.3 deg (docs/45 4.17) */
+#define BAL_TRIM_MAX_DEG        5.0f    /* must cover the zero error INCLUDING the
+                                         * USB lead: plugged the bench sat at -2.6 deg
+                                         * and unplugged near 0, a 3 deg swing that
+                                         * pinned the old +-3 deg clamp (docs/00#087) */
 
 /* Slow zero adaptation, walked by the WHEEL (docs/45 4.17). Gravity pins the
  * body at the true balance point, so in steady state
@@ -816,7 +818,8 @@ extern "C" {
  *  loop through the 12 s hunting mode and produced a limit cycle, while
  *  freezing the walk left the machine calm (docs/00 #084, #085). */
 #define BAL_WALK_FAST_RPM       150.0f  /* above this the walk uses fast gain     */
-#define BAL_WALK_FAST_X         5.0f    /* 5x => 0.1 deg/s at the step cap        */
+#define BAL_WALK_FAST_X         1.0f    /* OFF on purpose: 5x swung the trim +-1 deg
+                                          and drove a 3 deg sway (docs/00#087)     */
 #define BAL_WALK_FILT_TAU_S     8.0f
 #define BAL_WALK_DEADBAND_RPM   40.0f   /* below this the walk stops        */
 #define BAL_WALK_PHI_GATE_DEG   2.0f    /* outside this the body is falling */
