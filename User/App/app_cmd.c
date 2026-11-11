@@ -840,6 +840,12 @@ static void print_bal_run(void)
                (r->tau_peak_mnm < 0.0f) ? "-" : "+", (double)fabsf(r->tau_peak_mnm));
     log_printf(" window = %u ms, frames %u, saturated %u",
                (unsigned)r->run_ms, (unsigned)r->frames, (unsigned)r->sat_frames);
+    /* walk_calls is the trim-walk tick count. It must be about 2 per second of
+     * window (BAL_WALK_DIV = 100 attitude frames of 5 ms). A four digit number
+     * means the tick still runs off the main loop instead of the IMU stream. */
+    log_printf(" walk   = %u calls (%u ms window, %.1f per s)",
+               (unsigned)r->walk_calls, (unsigned)r->run_ms,
+               (r->run_ms > 0u) ? ((double)r->walk_calls * 1000.0 / (double)r->run_ms) : 0.0);
     log_printf(" peaks  = phi %.2f deg, rate %.1f deg/s, wheel %.0f rpm",
                (double)r->phi_peak_deg, (double)r->rate_peak_dps,
                (double)r->omega_peak_rpm);

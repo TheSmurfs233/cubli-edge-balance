@@ -407,6 +407,7 @@ typedef struct {
     uint32_t run_ms;       /* since ARM                                */
     uint32_t frames;       /* frames that produced a new command       */
     uint32_t sat_frames;   /* frames where the law saturated           */
+    uint32_t walk_calls;   /* trim-walk updates this run (expect ~2/s) */
 } app_bal_run_t;
 
 /* 0 = OK; 1 = attitude invalid; 2 = tilt outside ARM window;

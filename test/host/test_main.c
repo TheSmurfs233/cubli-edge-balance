@@ -3994,6 +3994,44 @@ static void test_balkey(void)
     T(fabsf(app_balance_info()->tau_applied_mnm) <= BAL_SLEW_MNM_STEP + 0.01f);
     section_end();
 
+    /* Regression guard for the 2026-11-12 find: the walk tick used to be gated
+     * by "att seq changed", but mid_att bumps seq on every call and the main
+     * loop calls it at tens of kHz, so the 100-frame divider fired hundreds of
+     * times a second instead of twice. 300 attitude frames must produce about
+     * three ticks; the broken version produced about 300. */
+    section("balkey: the trim walk ticks per frame, not per loop pass");
+    {
+        uint32_t w0;
+        uint32_t i;
+        uint16_t seq = 210u;
+
+        /* An earlier section turns the automatic walk off; this one needs it on
+         * or the tick count would be zero for the wrong reason. */
+        tx_clear();
+        cmd_feed("bal auto on\r\n");
+        pump_all();
+        T(app_bal_auto_get() == 1u);
+        w0 = app_balance_info()->walk_calls;
+
+        for (i = 0u; i < 300u; i++)
+        {
+            /* The walk only ticks on a live encoder reading. */
+            if ((i % 10u) == 0u) {
+                enc_build_frame((uint16_t)(1000u + i), 0u);
+                mid_enc_update();
+            }
+            att_feed_rate(0.4f, 0.0f, (uint8_t)seq);
+            seq++;
+            fake_tick_add(5u);
+            s6_pump();
+        }
+        printf("  walk ticks over 300 frames: %u\n",
+               (unsigned)(app_balance_info()->walk_calls - w0));
+        T((app_balance_info()->walk_calls - w0) <= 5u);
+        T((app_balance_info()->walk_calls - w0) >= 1u);
+    }
+    section_end();
+
     cmd_feed("bal run off\r\n");
     cmd_feed("stop\r\n");
 }

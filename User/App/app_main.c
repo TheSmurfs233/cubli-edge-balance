@@ -334,7 +334,6 @@ static app_bal_info_t s_bal;
  * an access into a wild pointer (see app_bal_update()). */
 static app_bal_info_t *volatile s_bal_p = &s_bal;
 static uint8_t        s_bal_on;
-static uint32_t       s_bal_seq_prev;   /* attitude frame seen by the last update */
 static uint32_t       s_walk_div;       /* attitude frames since the last walk    */
 static uint8_t        s_bal_auto = 1u;  /* whether the wheel may walk the trim  */
 static float          s_walk_k = -1.0f; /* >= 0: runtime override of trim_w_k   */
@@ -573,40 +572,16 @@ void app_bal_update(void)
         }
     }
 
-    /* The slow zero trim runs once per attitude frame (5 ms), not once per main
-     * loop pass: the low-pass that feeds it is a 0.5 s filter and a 20 kHz
-     * call rate would make it depend on how busy the loop is.
-     *
-     * 2026-11-05: only while the loop is actually balancing. The trim has no
-     * negative feedback when the body is held still (flat on the desk), so an
-     * ungated adaptor wound it to the clamp and then shoved the cube over. */
-    if ((s_bal_seq_prev != a->seq) && (s_bal_auto != 0u) &&
-        (run_p()->engaged != 0u) &&
-        (run_p()->state == BAL_ST_RUN))
-    {
-        s_bal_seq_prev = a->seq;
-        /* The 2026-11-06 runaway happened because a frozen wheel reading was
-         * trusted: the walk then integrated a constant and parked the trim on
-         * its clamp. Only walk on a reading that is valid and still moving. */
-        /* The walk runs at 2 Hz, not once per frame. At 200 Hz with the old
-         * gain the reference moved faster than the body could follow and the
-         * loop wound the trim onto its clamp (docs/00#082, sim/s7_trim_law.py). */
-        if (++s_walk_div >= BAL_WALK_DIV)
-        {
-            s_walk_div = 0u;
-            if (app_bal_walk_ready() != 0u)
-            {
-                /* Re-assert the bench override if anything reloaded the
-                 * cfg underneath us (arm, reset, cfg reload). */
-                if ((s_walk_k >= 0.0f) &&
-                    (alg_bal_trim_wk_get() != s_walk_k))
-                {
-                    (void)alg_bal_trim_wk_set(s_walk_k);
-                }
-                alg_bal_adapt(BAL_WALK_DT_S);
-            }
-        }
-    }
+    /* The slow zero trim used to be ticked from here, gated by "a->seq changed".
+     * That gate is wrong: mid_att bumps seq on EVERY call (User/Mid/mid_att.c),
+     * and app_att_update() runs on every main loop pass, so the gate opened at
+     * the loop rate (measured 56 kHz) instead of once per attitude frame. The
+     * 100-frame divider then fired about 560 times a second instead of twice,
+     * i.e. the walk ran ~280 times faster than designed; the per-call step cap
+     * only limited it to 0.05 deg x 560 = 28 deg/s. Bench 2026-11-12: trim
+     * walked at 1..3 deg/s and chased phi, which is the 4 s swing of #097.
+     * The tick now lives in app_balance_update(), behind the IMU frame counter,
+     * so it is exactly one call per attitude frame (see s_walk_div there). */
 
     bal_p()->valid       = 1u;
     bal_p()->tau_mnm     = o.tau_nm * 1000.0f;
@@ -883,6 +858,8 @@ uint8_t app_balance_arm(uint8_t on)
     s_run.run_ms         = 0u;
     s_run.frames         = 0u;
     s_run.sat_frames     = 0u;
+    s_run.walk_calls     = 0u;
+    s_walk_div           = 0u;
     s_run.tau_peak_mnm   = 0.0f;
     s_run.phi_peak_deg   = 0.0f;
     s_run.omega_peak_rpm = 0.0f;
@@ -959,6 +936,8 @@ uint8_t app_balance_start_now(void)
     s_tau_cmd     = 0.0f;
     s_held_frames = 0u;
     s_learn_done  = 0u;
+    s_walk_div    = 0u;
+    s_run.walk_calls = 0u;
     return 0u;
 }
 
@@ -1046,6 +1025,33 @@ void app_balance_update(void)
 
     app_bal_update();                  /* recompute with this frame */
     tau = bal_p()->tau_mnm;
+
+    /* Wheel walk tick: exactly one call per attitude frame (this function returns
+     * early unless a new IMU frame arrived), divided down to BAL_WALK_DIV frames
+     * = 100 x 5 ms = the 0.5 s that BAL_WALK_DT_S assumes. Keeping the divider
+     * here is what ties the walk rate to the 200 Hz attitude stream instead of
+     * the 56 kHz main loop (see the note in app_bal_update()). */
+    if ((s_bal_auto != 0u) && (run_p()->engaged != 0u) && (run_p()->state == (uint8_t)BAL_ST_RUN))
+    {
+        if (++s_walk_div >= BAL_WALK_DIV)
+        {
+            s_walk_div = 0u;
+            /* The 2026-11-06 runaway happened because a frozen wheel reading was
+             * trusted: the walk then integrated a constant and parked the trim on
+             * its clamp. Only walk on a reading that is valid and still moving. */
+            if (app_bal_walk_ready() != 0u)
+            {
+                /* Re-assert the bench override if anything reloaded the cfg
+                 * underneath us (arm, reset, cfg reload). */
+                if ((s_walk_k >= 0.0f) && (alg_bal_trim_wk_get() != s_walk_k))
+                {
+                    (void)alg_bal_trim_wk_set(s_walk_k);
+                }
+                alg_bal_adapt(BAL_WALK_DT_S);
+                run_p()->walk_calls++;
+            }
+        }
+    }
 
     /* Engage-on-release. While waiting we command nothing: fighting the hand
      * would only spin the wheel (measured 403 rpm in 265 ms). The first frame

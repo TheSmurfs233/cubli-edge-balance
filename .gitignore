@@ -67,3 +67,4 @@ MDK-ARM/.tmp*
 # release artifacts (firmware snapshots) are intentional binaries
 !release/*
 !release/**
+*.csv
